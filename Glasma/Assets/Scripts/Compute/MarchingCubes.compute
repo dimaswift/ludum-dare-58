@@ -1,0 +1,254 @@
+#pragma kernel Construct
+#pragma kernel Clear
+
+#define SIZEOF_UINT 4
+#define SIZEOF_FLOAT3 12
+
+
+#include "Assets/Scripts/Compute/QuantumField.cginc"
+
+StructuredBuffer<SculptSolid> Solids;
+RWByteAddressBuffer VertexBuffer;
+RWByteAddressBuffer IndexBuffer;
+RWStructuredBuffer<uint> Counter;
+StructuredBuffer<uint2> TriangleTable;
+StructuredBuffer<Photon> Photons;
+
+uint3 Dims;
+uint MaxTriangle;
+uint FlipNormals;
+uint InvertTriangles; 
+int SolidCount;
+
+float4x4 Transform;
+float Radius;
+float TimeStep;
+float EscapeRadius;
+float Soften;
+float Density;
+float Frequency;
+float Size;
+float Scale;
+float Surface;
+int Steps;
+float3 Offset;
+float4x4 PhotonTransform;
+
+
+float3 TransformPoint(float3 p)
+{
+    return (p + 0.5 - Dims / 2) * (1.0 / Dims.x);
+}
+
+uint EdgeIndexFromTriangleTable(uint2 data, uint index)
+{
+    return 0xfu & (index < 8 ? data.x >> ((index + 0) * 4) :
+                               data.y >> ((index - 8) * 4));
+}
+
+float expDecay(float a, float b, float decay, float t)
+{
+    return b + (a - b) * exp (-decay * t);
+}
+
+float sampleMask(uint3 id)
+{
+    float ux = float(id.x - float(Dims.x) * 0.5) / Dims.x;
+    float uy = float(id.y - float(Dims.y) * 0.5) / Dims.x;
+    float uz = float(id.z - float(Dims.z) * 0.5) / Dims.x;
+    
+    float3 p = float3(ux, uy, uz);
+    FieldConfig cfg;
+    cfg.radius = Radius;
+    cfg.phase = 0;
+    cfg.frequency = Frequency;
+    cfg.density = Density;
+    // cfg.colors = IcoVertices;
+    cfg.dt = TimeStep;
+    cfg.soften = Soften;
+    float3 fieldPos = ((mul(Transform, p)) + float3(Transform[0][3],Transform[1][3],Transform[2][3]) + Offset) * exp(Scale);
+
+    Trajectory v = SampleField(Steps, fieldPos, float3(0,0,0), EscapeRadius, cfg, Photons[0], PhotonTransform, Solids[SolidCount - 1]);
+    float msk = 0;
+    for (int k = 0; k < SolidCount - 1; k++)
+    {
+        float f = evaluateSolidField(p, Solids[k]);
+        SculptSolid s = Solids[k];
+        switch (s.op)
+        {
+            case 0:
+                msk += f;
+                break;
+            case 1:
+                msk += v.energy * f;
+                break;
+            case 2:
+                msk += v.energy * f;
+                break;
+            case 3:
+                msk = min(v.energy, f * s.lerp) * s.exp;
+                break;
+            case 4:
+                msk = expDecay(msk, f, s.lerp, s.exp);
+                break;
+            default:
+                   
+                break;
+        }
+    }
+
+    return msk * v.energy;
+}
+
+float sampleFieldVoxel(uint x, uint y, uint z)
+{
+    return sampleMask(uint3(x,y,z));
+}
+
+float4 VoxelValueWithGradient(uint3 i)
+{
+    const uint3 i_n = max(i, 1) - 1;
+    const uint3 i_p = min(i + 1, Dims - 1);
+    
+    // Sample the field values
+    const float center = sampleFieldVoxel(i.x, i.y, i.z);
+    const float v_nx = sampleFieldVoxel(i_n.x, i.y, i.z);
+    const float v_px = sampleFieldVoxel(i_p.x, i.y, i.z);
+    const float v_ny = sampleFieldVoxel(i.x, i_n.y, i.z);
+    const float v_py = sampleFieldVoxel(i.x, i_p.y, i.z);
+    const float v_nz = sampleFieldVoxel(i.x, i.y, i_n.z);
+    const float v_pz = sampleFieldVoxel(i.x, i.y, i_p.z);
+    
+    // Calculate gradient from the original field (this gives us correct normals)
+    const float3 gradient = float3(v_px - v_nx, v_py - v_ny, v_pz - v_nz);
+    
+    float marchingValue = center - Surface;
+    
+    return float4(gradient, marchingValue);
+}
+
+void WriteVertex(uint offset, float3 p, float3 n)
+{
+    uint addr_p = offset * SIZEOF_FLOAT3 * 2;
+    uint addr_n = addr_p + SIZEOF_FLOAT3;
+    VertexBuffer.Store3(addr_p, asuint(p));
+    VertexBuffer.Store3(addr_n, asuint(n));
+}
+
+void WriteIndices(uint offset, uint3 indices)
+{
+    IndexBuffer.Store3(offset * SIZEOF_UINT, indices);
+}
+
+uint3 CubeVertex(uint index)
+{
+    bool x = index & 1;
+    bool y = index & 2;
+    bool z = index & 4;
+    return uint3(x ^ y, y, z);
+}
+
+uint2 EdgeVertexPair(uint index)
+{
+    uint v1 = index & 7;
+    uint v2 = index < 8 ? ((index + 1) & 3) | (index & 4) : v1 + 4;
+    return uint2(v1, v2);
+}
+
+[numthreads(8, 8, 1)]
+void Construct(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id + 1 >= Dims.xyz)) return;
+
+    uint i;
+    
+    float totalAlpha = 0;
+    
+    for (i = 0; i < 8; i++)
+    {
+        float a = sampleMask(id + CubeVertex(i));
+        totalAlpha += a;
+    }
+
+    if (totalAlpha == 0) return;
+
+    float4 samples[8];
+    
+    for (i = 0; i < 8; i++)
+        samples[i] = VoxelValueWithGradient(id + CubeVertex(i));
+
+    uint selector = 0;
+    for (i = 0; i < 8; i++)
+        selector |= (samples[i].w > 0) << i;
+    
+    if (selector == 0 || selector == 0xff) return;
+    
+    float3 vertices[12];
+    float3 normals[12];
+    [unroll]
+    for (i = 0; i < 12; i++)
+    {
+        uint2 pair = EdgeVertexPair(i);
+        float4 sample1 = samples[pair.x];
+        float4 sample2 = samples[pair.y];
+        const float3 vertex1 = id + CubeVertex(pair.x);
+        const float3 vertex2 = id + CubeVertex(pair.y);
+        
+        // Interpolate based on zero crossing
+        const float param = sample1.w / (sample1.w - sample2.w);
+        vertices[i] = TransformPoint(lerp(vertex1, vertex2, param));
+        
+        // Interpolate gradients and normalize to get normal
+        float3 normal = -normalize(lerp(sample1.xyz, sample2.xyz, param));
+        
+        // Apply flip normals if requested
+        normals[i] = FlipNormals ? -normal : normal;
+    }
+    
+    const uint2 tri_data = TriangleTable[selector];
+    for (i = 0; i < 15; i += 3)
+    {
+        uint e3;
+        uint e2;
+        uint e1;
+
+        if (InvertTriangles == 1)
+        {
+            e3 = EdgeIndexFromTriangleTable(tri_data, i);
+            e2 = EdgeIndexFromTriangleTable(tri_data, i + 1);
+            e1 = EdgeIndexFromTriangleTable(tri_data, i + 2);
+            if (e3 == 15) return;
+        }
+        else
+        {
+            e1 = EdgeIndexFromTriangleTable(tri_data, i);
+            e2 = EdgeIndexFromTriangleTable(tri_data, i + 1);
+            e3 = EdgeIndexFromTriangleTable(tri_data, i + 2);
+            if (e1 == 15) return;
+        }
+        
+        const uint count = Counter.IncrementCounter();
+        if (count >= MaxTriangle) return;
+
+        const uint vidx = count * 3;
+        WriteVertex(vidx + 0, vertices[e1], normals[e1]);
+        WriteVertex(vidx + 1, vertices[e2], normals[e2]);
+        WriteVertex(vidx + 2, vertices[e3], normals[e3]);
+        WriteIndices(vidx, uint3(vidx, vidx + 1, vidx + 2));
+    }
+}
+
+[numthreads(64, 1, 1)]
+void Clear(uint id : SV_DispatchThreadID)
+{
+    while (true)
+    {
+        const  uint count = Counter.IncrementCounter();
+        if (count >= MaxTriangle) break;
+        const  uint vidx = count * 3;
+        WriteVertex(vidx + 0, 0, 0);
+        WriteVertex(vidx + 1, 0, 0);
+        WriteVertex(vidx + 2, 0, 0);
+        WriteIndices(vidx, uint3(0, 0, 0));
+    }
+}

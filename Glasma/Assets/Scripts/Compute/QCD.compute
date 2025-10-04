@@ -1,0 +1,63 @@
+#pragma kernel Run
+
+#include "Assets/Scripts/Compute/QuantumField.cginc"
+
+RWTexture2D<float4> Slice;
+RWStructuredBuffer<Particle> Particles;
+float DeltaTime;
+float Force;
+float Radius;
+
+
+
+[numthreads(64,1,1)]
+void Run (uint3 id : SV_DispatchThreadID)
+{
+    FieldConfig cfg;
+   
+    Particle p = Particles[id.x];
+    cfg.radius = p.horizon;
+    cfg.phase = p.phase;
+    cfg.frequency = p.frequency;
+    cfg.density = p.density;
+  //  cfg.colors = p.colors;
+    cfg.dt = p.deltaTime;
+    cfg.soften = p.soften;
+    
+    float3 top = p.position + mul(p.spin, float3(0, p.size, 0));
+    float3 down = p.position + mul(p.spin, float3(0, -p.size, 0));
+    float3 left = p.position + mul(p.spin, float3(-p.size, 0, 0));
+    float3 right = p.position + mul(p.spin, float3(p.size, 0, 0));
+    float3 front = p.position + mul(p.spin, float3(0, 0, p.size));
+    float3 back = p.position + mul(p.spin, float3(0, 0, -p.size));
+    
+    Trajectory t_top = SampleField(p.depth, top, p.core, p.radius, cfg);
+    Trajectory t_down = SampleField(p.depth, down, p.core, p.radius, cfg);
+    Trajectory t_left = SampleField(p.depth, left, p.core, p.radius, cfg);
+    Trajectory t_right = SampleField(p.depth, right, p.core, p.radius, cfg);
+    Trajectory t_front = SampleField(p.depth, front, p.core, p.radius, cfg);
+    Trajectory t_back = SampleField(p.depth, back, p.core, p.radius, cfg);
+    
+    float3 gradient_local = float3(
+        (t_right.energy - t_left.energy) / (2.0 * p.size),
+        (t_top.energy - t_down.energy) / (2.0 * p.size),
+        (t_front.energy - t_back.energy) / (2.0 * p.size)
+    );
+    
+    float3 gradient_world = mul(p.spin, gradient_local);
+    
+    //p.velocity += gradient_world * (Force);
+
+    p.position += gradient_world * Force;
+    
+  //  gradient_world = mul(p.spin, gradient_local);
+    
+ //   p.velocity += gradient_world * (DeltaTime * 0.5);
+
+    if(length(p.position) > Radius)
+    {
+        p.position = gradient_world * (DeltaTime * 0.1);
+    }
+    
+    Particles[id.x] = p;
+}
