@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 5327772366550869076}
   - component: {fileID: 8253803068630108544}
   m_Layer: 0
-  m_Name: Cube64
+  m_Name: Q_32
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -27,8 +27,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1131069241782729197}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.000037212452, y: 0.0000024324606, z: 0.000009573912, w: 1}
-  m_LocalPosition: {x: -0.0000050712515, y: 0.000012343819, z: -0.000043972348}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -49,11 +49,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7f49d45072634af4985ded5f17584e54, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DefaultNamespace.Volume
-  update: 1
+  update: 0
   field: {fileID: 11400000, guid: a67e829c25520478b8c98b6f73e3565a, type: 2}
   flesh: {fileID: 2056878820177477410}
+  config: {fileID: 11400000, guid: c904b9872030e4d4bb59d7679f297216, type: 2}
   meshFilter: {fileID: 6689361229437962783}
-  config: {fileID: 11400000, guid: 3dfeac02b18f445079189bfffe4416e3, type: 2}
   compute: {fileID: 7200000, guid: b66db7774f2542f9887bc513683eb5ed, type: 3}
 --- !u!65 &5327772366550869076
 BoxCollider:

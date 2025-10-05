@@ -169,7 +169,7 @@ void Construct(uint3 id : SV_DispatchThreadID)
     uint i;
     
     float totalAlpha = 0;
-  //  [unroll]
+    [unroll]
     for (i = 0; i < 8; i++)
     {
         float a = sampleMask(id + CubeVertex(i));
@@ -180,12 +180,12 @@ void Construct(uint3 id : SV_DispatchThreadID)
 
     float4 samples[8];
 
-   // [unroll]
+    [unroll]
     for (i = 0; i < 8; i++)
         samples[i] = VoxelValueWithGradient(id + CubeVertex(i));
 
     uint selector = 0;
-  //  [unroll]
+    [unroll]
     for (i = 0; i < 8; i++)
         selector |= (samples[i].w > 0) << i;
     
@@ -193,7 +193,7 @@ void Construct(uint3 id : SV_DispatchThreadID)
     
     float3 vertices[12];
     float3 normals[12];
-  //  [unroll]
+    [unroll]
     for (i = 0; i < 12; i++)
     {
         uint2 pair = EdgeVertexPair(i);
@@ -210,40 +210,31 @@ void Construct(uint3 id : SV_DispatchThreadID)
         float3 normal = -normalize(lerp(sample1.xyz, sample2.xyz, param));
         
         // Apply flip normals if requested
-        normals[i] = FlipNormals ? -normal : normal;
+        normals[i] = normal;
     }
     
     const uint2 tri_data = TriangleTable[selector];
-  //  [unroll]
+    [unroll]
     for (i = 0; i < 15; i += 3)
     {
         uint e3;
         uint e2;
         uint e1;
-
-        if (InvertTriangles == 1)
+        e1 = EdgeIndexFromTriangleTable(tri_data, i);
+        e2 = EdgeIndexFromTriangleTable(tri_data, i + 1);
+        e3 = EdgeIndexFromTriangleTable(tri_data, i + 2);
+        if (e1 != 15)
         {
-            e3 = EdgeIndexFromTriangleTable(tri_data, i);
-            e2 = EdgeIndexFromTriangleTable(tri_data, i + 1);
-            e1 = EdgeIndexFromTriangleTable(tri_data, i + 2);
-            if (e3 == 15) return;
+            const uint count = Counter.IncrementCounter();
+            if (count < MaxTriangle)
+            {
+                const uint vidx = count * 3;
+                WriteVertex(vidx + 0, vertices[e1], normals[e1]);
+                WriteVertex(vidx + 1, vertices[e2], normals[e2]);
+                WriteVertex(vidx + 2, vertices[e3], normals[e3]);
+                WriteIndices(vidx, uint3(vidx, vidx + 1, vidx + 2));
+            }
         }
-        else
-        {
-            e1 = EdgeIndexFromTriangleTable(tri_data, i);
-            e2 = EdgeIndexFromTriangleTable(tri_data, i + 1);
-            e3 = EdgeIndexFromTriangleTable(tri_data, i + 2);
-            if (e1 == 15) return;
-        }
-        
-        const uint count = Counter.IncrementCounter();
-        if (count >= MaxTriangle) return;
-
-        const uint vidx = count * 3;
-        WriteVertex(vidx + 0, vertices[e1], normals[e1]);
-        WriteVertex(vidx + 1, vertices[e2], normals[e2]);
-        WriteVertex(vidx + 2, vertices[e3], normals[e3]);
-        WriteIndices(vidx, uint3(vidx, vidx + 1, vidx + 2));
     }
 }
 
