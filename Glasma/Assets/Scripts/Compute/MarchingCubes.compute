@@ -1,5 +1,8 @@
 #pragma kernel Construct
 #pragma kernel Clear
+#pragma kernel InitHoleMask
+#pragma kernel AddHole
+#pragma kernel AddHoleSoft
 
 #define SIZEOF_UINT 4
 #define SIZEOF_FLOAT3 12
@@ -13,14 +16,22 @@ RWByteAddressBuffer IndexBuffer;
 RWStructuredBuffer<uint> Counter;
 StructuredBuffer<uint2> TriangleTable;
 StructuredBuffer<Photon> Photons;
+RWTexture3D<float> HoleMask;
+uint3 HoleMaskDims; 
+SamplerState samplerHoleMask; // Define this
+
 
 uint3 Dims;
 uint MaxTriangle;
 uint FlipNormals;
 uint InvertTriangles; 
 int SolidCount;
+uint3 HolePosition;
+uint3 HoleSize;
+float HoleValue;
 
-float4x4 Transform;
+float4x4 WorldToFractalMatrix;
+float4x4 LocalToWorldMatrix;
 float Radius;
 float TimeStep;
 float EscapeRadius;
@@ -33,7 +44,6 @@ float Surface;
 int Steps;
 float3 Offset;
 float4x4 PhotonTransform;
-
 
 float3 TransformPoint(float3 p)
 {
@@ -51,12 +61,28 @@ float expDecay(float a, float b, float decay, float t)
     return b + (a - b) * exp (-decay * t);
 }
 
+
 float sampleMask(uint3 id)
 {
+    
     if (id.x == 0 || id.y == 0 || id.z == 0 || id.x == Dims.x || id.y == Dims.y || id.z == Dims.z)
     {
        return 0;
     }
+    
+    // Nearest neighbor sampling
+    float3 uvw = (float3)id / (float3)Dims;
+    uint3 holeMaskCoord = (uint3)(uvw * (float3)HoleMaskDims);
+    holeMaskCoord = min(holeMaskCoord, HoleMaskDims - 1);
+    
+    float holeMask = HoleMask[holeMaskCoord];
+    
+    if (holeMask < 1)
+    {
+        return 0; // Inside hole
+    }
+    
+    
     float ux = float(id.x - float(Dims.x) * 0.5) / Dims.x;
     float uy = float(id.y - float(Dims.y) * 0.5) / Dims.x;
     float uz = float(id.z - float(Dims.z) * 0.5) / Dims.x;
@@ -71,41 +97,55 @@ float sampleMask(uint3 id)
     cfg.dt = TimeStep;
     cfg.soften = Soften;
     float msk = 1;
- 
+    
+    float4 worldPos = mul(LocalToWorldMatrix, float4(p, 1.0));
 
-    float3 fieldPos = ((mul(Transform, p)) + float3(Transform[0][3],Transform[1][3],Transform[2][3]) + Offset) * exp(Scale);
+    // 3. Transform the world position back into the parent's "fractal space"
+    //    This is the key step that makes the fractal "stick" to the cube.
+    float4 fractalPos = mul(WorldToFractalMatrix, worldPos);
 
-    Trajectory v = SampleField(Steps, fieldPos, float3(0,0,0), EscapeRadius, cfg, Photons[0], PhotonTransform);
- 
-    // for (int k = 0; k < SolidCount ; k++)
-    // {
-    //     float f = evaluateSolidField(p, Solids[k]);
-    //     SculptSolid s = Solids[k];
-    //     switch (s.op)
-    //     {
-    //         case 0:
-    //             msk += f;
-    //             break;
-    //         case 1:
-    //             msk += v.energy * f;
-    //             break;
-    //         case 2:
-    //             msk += v.energy * f;
-    //             break;
-    //         case 3:
-    //             msk = min(v.energy, f * s.lerp) * s.exp;
-    //             break;
-    //         case 4:
-    //             msk = expDecay(msk, f, s.lerp, s.exp);
-    //             break;
-    //         default:
-    //                
-    //             break;
-    //     }
-    // }
+    // 4. Apply the final global fractal scaling
+    float3 finalSamplePos = fractalPos.xyz * exp(Scale);
 
- 
+    Trajectory v = SampleField(Steps, finalSamplePos, float3(0,0,0), EscapeRadius, cfg, Photons[0], PhotonTransform);
+    
     return v.energy * msk;
+}
+
+[numthreads(1, 1, 1)]
+void InitHoleMask(uint3 id : SV_DispatchThreadID)
+{
+    HoleMask[id] = 1.0;
+}
+
+[numthreads(1, 1, 1)]
+void AddHole(uint3 id : SV_DispatchThreadID)
+{
+    uint3 writePos = HolePosition + id;
+    
+    // Bounds check
+    if (any(writePos >= HoleMaskDims)) return;
+    
+    // Write hole value
+    HoleMask[writePos] = HoleValue;
+}
+
+[numthreads(1, 1, 1)]
+void AddHoleSoft(uint3 id : SV_DispatchThreadID)
+{
+    uint3 writePos = HolePosition + id;
+    if (any(writePos >= HoleMaskDims)) return;
+    
+    // Calculate distance from center for smooth falloff
+    float3 center = (float3)HoleSize * 0.5;
+    float3 delta = (float3)id - center;
+    float dist = length(delta);
+    float maxDist = length(center);
+    
+    // Smooth falloff (1.0 at edge, 0.0 at center)
+    float falloff = saturate(dist / maxDist);
+    
+    HoleMask[writePos] = min(HoleMask[writePos], falloff);
 }
 
 float sampleFieldVoxel(uint x, uint y, uint z)

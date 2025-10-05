@@ -20,7 +20,7 @@ public static class Mouse
         return Vector3.zero;
     }
     
-    public static bool IsHitting<T>(out T component) where T: Component
+    public static bool IsHitting<T>(out T component, out Vector3 hitPoint) where T: Component
     {
         if (!cam) cam = Camera.main;
         if (cam != null)
@@ -39,9 +39,11 @@ public static class Mouse
                 }
             }
             component = res?.transform?.GetComponent<T>();
+            hitPoint = res?.point ?? Vector3.zero;
             return component != null;
         }
 
+        hitPoint = Vector3.zero;
         component = null;
         return false;
     }

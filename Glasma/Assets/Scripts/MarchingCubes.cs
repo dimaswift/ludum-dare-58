@@ -22,6 +22,7 @@ public enum SculptOperation
     Interpolate = 3,
     Cut = 4
 }
+
 [StructLayout(LayoutKind.Sequential)]
 [Serializable]
 public struct SculptSolid
@@ -65,9 +66,9 @@ public class MarchingCubes : System.IDisposable
     public int Budget => triangleBudget;
     public Mesh Mesh => mesh;
 
-    public MarchingCubes(ComputeShader compute, Vector3Int dimensions, int maxBudget)
+    public MarchingCubes(ComputeShader compute, int maxBudget, Vector3Int holeResolution)
     {
-        Initialize(compute, maxBudget);
+        Initialize(compute, maxBudget, holeResolution);
     } 
 
     public void Dispose()
@@ -84,15 +85,19 @@ public class MarchingCubes : System.IDisposable
     private Mesh mesh;
     private GraphicsBuffer vertexBuffer;
     private GraphicsBuffer indexBuffer;
-    private int constructKernel, clearKernel;
+    private int constructKernel, clearKernel, initHolesKernel, addHoleKernel, addHoleSoftKernel;
+    public RenderTexture holeMaskTexture;
+    private Vector3Int holeMaskResolution;
+    
 
     private int CalculateBudget(int maxBudget)
     {
         return maxBudget;
     }
     
-    private void Initialize(ComputeShader computeSource, int maxBudget)
+    private void Initialize(ComputeShader computeSource, int maxBudget, Vector3Int holeMaskRes)
     {
+        holeMaskResolution = holeMaskRes;
         triangleBudget = CalculateBudget(maxBudget);
         compute = computeSource;
         constructKernel = compute.FindKernel("Construct");
@@ -100,8 +105,41 @@ public class MarchingCubes : System.IDisposable
     
         AllocateBuffers();
         AllocateMesh(3 * triangleBudget);
+        if (holeMaskRes.sqrMagnitude > 0)
+        {
+            CreateHoleMask();
+        }
     }
 
+    private void CreateHoleMask()
+    {
+        holeMaskTexture = new RenderTexture(
+            holeMaskResolution.x,
+            holeMaskResolution.y,
+            0, // depth
+            RenderTextureFormat.RFloat
+        );
+        holeMaskTexture.dimension = UnityEngine.Rendering.TextureDimension.Tex3D;
+        holeMaskTexture.volumeDepth = holeMaskResolution.z;
+        holeMaskTexture.enableRandomWrite = true;
+        holeMaskTexture.filterMode = FilterMode.Bilinear;
+        holeMaskTexture.wrapMode = TextureWrapMode.Clamp;
+        holeMaskTexture.Create();
+        
+        // Get kernel indices
+        initHolesKernel = compute.FindKernel("InitHoleMask");
+        addHoleKernel = compute.FindKernel("AddHole");
+        addHoleSoftKernel = compute.FindKernel("AddHoleSoft");
+        
+        // Initialize texture to all solid (1.0)
+        compute.SetTexture(initHolesKernel, "HoleMask", holeMaskTexture);
+        
+        compute.SetInts("HoleMaskDims", 
+            holeMaskResolution.x, holeMaskResolution.y, holeMaskResolution.z);
+
+        compute.Dispatch(initHolesKernel, holeMaskResolution.x, holeMaskResolution.y, holeMaskResolution.z);
+    }
+    
     private void ReleaseAll()
     {
         ReleaseBuffers();
@@ -124,6 +162,11 @@ public class MarchingCubes : System.IDisposable
         compute.SetBuffer(constructKernel, "VertexBuffer", vertexBuffer);
         compute.SetBuffer(constructKernel, "IndexBuffer", indexBuffer);
         compute.SetBuffer(constructKernel, "Counter", counterBuffer);
+        
+        compute.SetTexture(constructKernel, "HoleMask", holeMaskTexture);
+        
+        compute.SetInts("HoleMaskDims", 
+            holeMaskResolution.x, holeMaskResolution.y, holeMaskResolution.z);
         
         compute.DispatchThreads(constructKernel, dimensions.x, dimensions.y, dimensions.z);
         compute.SetBuffer(clearKernel, "VertexBuffer", vertexBuffer);
@@ -162,6 +205,41 @@ public class MarchingCubes : System.IDisposable
         compute.SetBuffer(constructKernel, "Solids", solidsBuffer);
       
         solidsBuffer.SetData(solids);
+    }
+    
+    public void AddHole(Vector3Int position, Vector3Int size, bool softEdges = false)
+    {
+        // Clamp position and size to valid ranges
+        position = Vector3Int.Max(Vector3Int.zero, position);
+        position = Vector3Int.Min(position, holeMaskResolution - Vector3Int.one);
+        
+        size = Vector3Int.Max(Vector3Int.one, size);
+        size = Vector3Int.Min(size, holeMaskResolution - position);
+        
+        int kernel = softEdges ? addHoleSoftKernel : addHoleKernel;
+        
+        compute.SetTexture(kernel, "HoleMask", holeMaskTexture);
+        compute.SetInts("HoleMaskDims", 
+            holeMaskResolution.x, holeMaskResolution.y, holeMaskResolution.z);
+        compute.SetInts("HolePosition", position.x, position.y, position.z);
+        
+        compute.SetInts("HoleSize", size.x, size.y, size.z);
+        compute.SetFloat("HoleValue", 0.0f); // 0 = hole
+        
+        compute.Dispatch(kernel, size.x, size.y, size.z);
+    }
+    
+    public void AddHole(Vector3Int position, int cubeSize, bool softEdges = false)
+    {
+        AddHole(position, new Vector3Int(cubeSize, cubeSize, cubeSize), softEdges);
+    }
+    
+    public void ClearAllHoles()
+    {
+        // Re-initialize to all solid
+        int threadGroups = Mathf.CeilToInt(holeMaskResolution.x / 4.0f);
+        compute.SetTexture(initHolesKernel, "HoleMask", holeMaskTexture);
+        compute.Dispatch(initHolesKernel, threadGroups, threadGroups, threadGroups);
     }
     
     private void AllocateBuffers()
@@ -214,6 +292,7 @@ public class MarchingCubes : System.IDisposable
         vertexBuffer?.Dispose();
         indexBuffer?.Dispose();
         Object.Destroy(mesh);
+        holeMaskTexture?.Release();
     }
     
     private static readonly ulong [] TriangleTable =

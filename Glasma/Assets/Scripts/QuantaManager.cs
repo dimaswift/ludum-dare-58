@@ -49,7 +49,7 @@ public class QuantaManager : MonoBehaviour
         if (Input.GetMouseButtonDown(0))
         {
             var ground = Mouse.CastGround();
-            var vol = Spawn(0);
+            var vol = Spawn(1);
             vol.transform.position = ground + new Vector3(0,1,0);
             vol.CollapseWave();
         }
@@ -57,10 +57,12 @@ public class QuantaManager : MonoBehaviour
         if (Input.GetMouseButtonDown(1))
         {
 
-            if (Mouse.IsHitting<Quanta>(out var volume))
+            if (Mouse.IsHitting<Quanta>(out var volume, out var hit))
             {
                 volume.Decay();
             } 
+            
+            
         }
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Serialization;
+using Random = UnityEngine.Random;
 
 public class Quanta : MonoBehaviour, IPoolable
 {
@@ -13,7 +14,7 @@ public class Quanta : MonoBehaviour, IPoolable
     [SerializeField] private Transform flesh;
     [SerializeField] private QuantaConfig config;
     [SerializeField] private MeshFilter meshFilter;
-    
+    [SerializeField] private float density = 1f;
     [SerializeField] private ComputeShader compute;
   
     private MarchingCubes marchingCubes;
@@ -28,7 +29,11 @@ public class Quanta : MonoBehaviour, IPoolable
 
     private BoxCollider box;
 
+    private Rigidbody body;
     
+    private Matrix4x4 gene;
+
+    [SerializeField] private List<Matrix4x4> dnaSequence = new(); 
     
     private void Awake()
     {
@@ -36,7 +41,11 @@ public class Quanta : MonoBehaviour, IPoolable
         CollapseWave();
     }
     
-
+    public void CopyDNA(List<Matrix4x4> sequence)
+    {
+        dnaSequence.AddRange(sequence);
+    }
+    
     public void Decay()
     {
         gameObject.SetActive(false);
@@ -47,21 +56,25 @@ public class Quanta : MonoBehaviour, IPoolable
         }
         
         var pos = transform.position;
-       
-        var shrinkage = 1.0f;
-        
-        for (int i = 0; i < config.tier; i++)
-        {
-            shrinkage /= 2.0f;
-        }
+        var rot = transform.rotation;
+
+        var shrinkage = 2.0f / Mathf.Pow(2, config.tier + 1);
         
         void Create(Vector3Int side)
         {
             var part = QuantaManager.Instance.Spawn(config.tier + 1);
             if (part == null) return;
-            part.SetSize(Vector3.one * shrinkage);
-            part.transform.position = pos + new Vector3(side.x, side.y, side.z) * shrinkage * 0.5f;
+            Vector3 offset = new Vector3(side.x, side.y, side.z) * shrinkage * 0.5f;
+            part.transform.rotation = rot;
+            var dir = part.transform.TransformDirection(offset);
+            part.transform.position = pos + dir;
+            Matrix4x4 dnaToKeep = new Matrix4x4();
+            dnaToKeep.SetTRS(flesh.position,flesh.rotation,Vector3.one);
+            dnaSequence.Add(dnaToKeep);
+            part.CopyDNA(dnaSequence);
+            
             part.CollapseWave();
+          //  part.Nudge(dir.normalized);
         }
         
         //SU(3)
@@ -74,25 +87,54 @@ public class Quanta : MonoBehaviour, IPoolable
         Create(new Vector3Int(-1, 1, -1));
         Create(new Vector3Int(1, -1, 1));
     }
-
-    public void SetSize(Vector3 size)
+    
+    public void Nudge(Vector3 direction)
     {
+        body.linearVelocity += direction * Random.Range(1f,3f);
+        body.angularVelocity = Random.insideUnitSphere * Random.Range(1f,3f);;
+    }
+
+    public void Resize()
+    {
+        if (config.tier == 1)
+        {
+            body.mass = density;
+            return;
+        }
+        var size = Vector3.one * (2.0f / Mathf.Pow(2, config.tier));
         box.size = size;
         flesh.localScale = size;
         meshFilter.transform.localScale = size;
+        body.mass = (size.x * size.y * size.z) * density;
+    }
+
+    public void Punch(Vector3 point)
+    {
+        var closest = box.ClosestPoint(point);
+        var local = (transform.InverseTransformPoint(closest) + new Vector3(0.5f, 0.5f,0.5f));
+        
+        marchingCubes.AddHole(new Vector3Int(
+            1,
+            1,
+            1), 14);
+
+        CollapseWave();
     }
     
     public void Init()
     {
+        body = GetComponent<Rigidbody>();
         box = GetComponent<BoxCollider>();
-        marchingCubes = new MarchingCubes(compute, config.resolution, config.maxTriangleBudget);
+        marchingCubes = new MarchingCubes(compute, config.maxTriangleBudget, config.holeResolution);
         photonBuffer = new ComputeBuffer(1, Marshal.SizeOf<Photon>());
         compute.SetBuffer(0, "Photons", photonBuffer);
         meshFilter.mesh = marchingCubes.Mesh;
+        Resize();
     }
-
+    
     public void OnPicked()
     {
+        dnaSequence.Clear();
         gameObject.SetActive(true);
     }
 
@@ -108,12 +150,15 @@ public class Quanta : MonoBehaviour, IPoolable
             solids.Add(s);
         }
         
-        var m = new Matrix4x4();
-        
-        m.SetTRS(flesh.position, flesh.rotation, flesh.localScale);
-        
+        Matrix4x4 worldToFractal = gene.inverse;
+        //TODO: doesn't work right (yet)
+        foreach (var pair in dnaSequence)
+        {
+            worldToFractal *= pair;
+        }
+        gene = flesh.localToWorldMatrix;
         var photonM = new Matrix4x4();
-
+        
         var newHash = HashCode.Combine(HashCode.Combine(HashCode.Combine(field.frequency,
             field.steps,
             field.density,
@@ -128,18 +173,23 @@ public class Quanta : MonoBehaviour, IPoolable
             field.offset,
             field.photon.GetHashCode(),
             solidHash),
-            m.GetHashCode()
+            worldToFractal.GetHashCode(),
+            gene
             );
         
         if (newHash == hash)
         {
             return;
         }
+        
         photonBuffer.SetData(new List<Photon>() {field.photon});
         hash = newHash;
         compute.SetMatrix("PhotonTranform", photonM);
-    
-        compute.SetMatrix("Transform", m);
+        compute.SetMatrix("WorldToFractalMatrix", worldToFractal);
+        
+        // You also need to tell the shader where this cube currently IS in the world
+        compute.SetMatrix("LocalToWorldMatrix", gene);
+
         compute.SetInt("Steps", field.steps);
         compute.SetFloat("Radius", field.radius);
         compute.SetFloat("EscapeRadius", field.escapeRadius);
@@ -153,6 +203,7 @@ public class Quanta : MonoBehaviour, IPoolable
         compute.SetVector("Offset",field.offset);
         marchingCubes.SetSculptSolids(solids);
         marchingCubes.Run(config.resolution);
+
     }
 
     private void Update()

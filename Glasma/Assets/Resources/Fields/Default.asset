@@ -19,16 +19,14 @@ MonoBehaviour:
     radius: 1.5
     density: 6.87
     scale: 1.55
-  offset: {x: 0, y: -5.53, z: -60.8}
-  steps: 2
+  offset: {x: 0, y: -35.44, z: 31.86}
+  steps: 1
   radius: 278.5
   escapeRadius: 94.1
-  soften: 8.9
-  timeStep: 28.7
-  density: 5.7
-  frequency: 14.8
+  soften: 12.1
+  timeStep: 31.3
+  density: 2.26
+  frequency: 149.7
   size: -1.93
-  scale: -1.22
+  scale: -2.76
   surface: 9.09
-  resolution: {x: 64, y: 64, z: 64}
-  maxTriangleBudget: 1500000
