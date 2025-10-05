@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4561883ab2794e32a189f048a966d147, type: 3}
-  m_Name: Default
+  m_Name: Elder
   m_EditorClassIdentifier: Assembly-CSharp::DefaultNamespace.FieldConfig
   photon:
     frequency: 16
@@ -19,15 +19,15 @@ MonoBehaviour:
     radius: 1.5
     density: 6.87
     scale: 1.55
-  offset: {x: 0, y: 4.65, z: -29.02}
-  steps: 1
-  radius: 57.9
-  escapeRadius: 94.1
-  soften: 6.05
-  timeStep: 8.86
-  density: 3.4
-  frequency: 14.07
-  size: -0.84
-  scale: -1.84
-  surface: 1.61
-  resolution: {x: 32, y: 32, z: 32}
+  offset: {x: 0, y: -4.08, z: 8.49}
+  steps: 5
+  radius: 202.55
+  escapeRadius: 34.5
+  soften: 5.82
+  timeStep: 2.77
+  density: 3.2
+  frequency: 161
+  size: 1.33
+  scale: -3.89
+  surface: 1.2
+  resolution: {x: 64, y: 64, z: 64}

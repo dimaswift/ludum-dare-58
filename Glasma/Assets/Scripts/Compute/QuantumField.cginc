@@ -1,5 +1,9 @@
 #define QUARK_COUNT 6
 #define PAIR_COUNT 15
+
+#define QUARK_COUNT 4
+#define PAIR_COUNT 6
+
 #define PI 3.14159265358979323846
 
 #include "Assets/Scripts/Compute/Masks.cginc"
@@ -36,12 +40,19 @@ struct FieldConfig
 
 const static float h = sqrt(3.0f) / 2.0f;
 
-// const static  float3 VERTICES[QUARK_COUNT] = {
-//     float3(0, 0, 0),
-//     float3(-0.5f, -h/3.0f, 0.0f),  
-//     float3( 0.5f, -h/3.0f, 0.0f),  
-//     float3( 0.0f,  2.0f*h/3.0f, 0.0f) 
-// };
+const static  float3 VERTICES[QUARK_COUNT] = {
+    float3(0, 0, 0),
+    float3(-0.5f, -h/3.0f, 0.0f),  
+    float3( 0.5f, -h/3.0f, 0.0f),  
+    float3( 0.0f,  2.0f*h/3.0f, 0.0f) 
+};
+static const int2 PAIRS[PAIR_COUNT] = {
+    int2(0,1), int2(0,2), int2(0,3),
+    int2(1,2), int2(1,3), 
+    int2(2,3), 
+};
+
+
 // const static  float3 VERTICES[QUARK_COUNT] = {
 //     float3(0.35355339, 0.35355339, 0.35355339),  // 0
 //     float3(0.35355339, -0.35355339, -0.35355339),  // 1
@@ -50,27 +61,23 @@ const static float h = sqrt(3.0f) / 2.0f;
 // };
 
 
-const static  float3 VERTICES[QUARK_COUNT] = {
-    float3(1.0f, 0.0f, 0.0f),  // 4
-float3(-1.0f, 0.0f, 0.0f),  // 5
-float3(0.0f, 1.0f, 0.0f),  // 6
-float3(0.0f, -1.0f, 0.0f),  // 7
-float3(0.0f, 0.0f, 1.0f),  // 8
-float3(0.0f, 0.0f, -1.0f),  // 9
-};
-
-
-static const int2 PAIRS[PAIR_COUNT] = {
-    int2(0,1), int2(0,2), int2(0,3), int2(0,4), 
- int2(0,5), int2(1,2), int2(1,3), int2(1,4), 
- int2(1,5), int2(2,3), int2(2,4), int2(2,5), 
- int2(3,4), int2(3,5), int2(4,5)
-};
-// static const int2 PAIRS[PAIR_COUNT] = {
-//     int2(0,1), int2(0,2), int2(0,3),
-//     int2(1,2), int2(1,3), 
-//     int2(2,3), 
+// const static  float3 VERTICES[QUARK_COUNT] = {
+//     float3(1.0f, 0.0f, 0.0f),  // 4
+//     float3(-1.0f, 0.0f, 0.0f),  // 5
+//     float3(0.0f, 1.0f, 0.0f),  // 6
+//     float3(0.0f, -1.0f, 0.0f),  // 7
+//     float3(0.0f, 0.0f, 1.0f),  // 8
+//     float3(0.0f, 0.0f, -1.0f),  // 9
 // };
+//
+//
+// static const int2 PAIRS[PAIR_COUNT] = {
+//     int2(0,1), int2(0,2), int2(0,3), int2(0,4), 
+//      int2(0,5), int2(1,2), int2(1,3), int2(1,4), 
+//      int2(1,5), int2(2,3), int2(2,4), int2(2,5), 
+//      int2(3,4), int2(3,5), int2(4,5)
+// };
+
 
 inline void computeAccelerations(
     in Quark bodies[QUARK_COUNT], 
@@ -253,15 +260,14 @@ Trajectory SampleField(
     float escapeR2,
     FieldConfig cfg,
     Photon photon,
-    float4x4 photonTransform,
-    SculptSolid solid
+    float4x4 photonTransform
 ){
     
     Quark quarks[QUARK_COUNT];
 
    // float f = sampleMatrix(position, photon, photonTransform);
   
-    float f = evaluateSolidField(position, solid);
+  //  float f = evaluateSolidField(position, solid);
     
     [unroll]
     for (int i=0; i<QUARK_COUNT; ++i)
@@ -280,16 +286,29 @@ Trajectory SampleField(
         
     float maxR2=0.0;
         
-    [unroll]
-    for (int i=0;i<QUARK_COUNT;++i)
+    for (int s = 0; s < steps; ++s)
     {
-        float v = dot(quarks[i].velocity, quarks[i].velocity);
-        energy += v;
-        maxR2 = max(maxR2, dot(quarks[i].velocity, quarks[i].velocity));
+        if (alive)
+        {
+            [unroll]
+            for (int i=0;i<QUARK_COUNT;++i)
+            {
+                float v = dot(quarks[i].velocity, quarks[i].velocity);
+                energy += v;
+                maxR2 = max(maxR2, dot(quarks[i].velocity, quarks[i].velocity));
+
+                if(maxR2 > escapeR2)
+                {
+                    esc = s;
+                    alive = false;
+                }
+            }
+        }
+      
     }
     
     Trajectory r;
     r.step=esc;
-    r.energy=energy * f;
+    r.energy=energy;
     return r;
 }

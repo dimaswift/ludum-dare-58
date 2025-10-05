@@ -8,7 +8,8 @@ namespace DefaultNamespace
 {
     public class Volume : MonoBehaviour
     {
-        [SerializeField] private SolidContainer globalSolid;
+        [SerializeField] private bool update;
+      
         [SerializeField] private FieldConfig field;
         [SerializeField] private Transform flesh;
         
@@ -34,16 +35,10 @@ namespace DefaultNamespace
             photonBuffer = new ComputeBuffer(1, Marshal.SizeOf<Photon>());
             compute.SetBuffer(0, "Photons", photonBuffer);
             meshFilter.mesh = marchingCubes.Mesh;
-            var col = GetComponent<MeshCollider>();
-            if (col)
-            {
-                col.sharedMesh = marchingCubes.Mesh;
-            }
-        
+            Construct();
         }
 
-
-        private void Update()
+        private void Construct()
         {
             solids.Clear();
             GetComponentsInChildren(solidContainers);
@@ -54,19 +49,18 @@ namespace DefaultNamespace
                 solidHash += s.GetHashCode();
                 solids.Add(s);
             }
-
             
             var m = new Matrix4x4();
             
             m.SetTRS(flesh.position, flesh.rotation, flesh.localScale);
             
             var photonM = new Matrix4x4();
-            photonM.SetTRS(globalSolid.transform.position, globalSolid.transform.rotation, globalSolid.transform.localScale);
+          //  photonM.SetTRS(globalSolid.transform.position, globalSolid.transform.rotation, globalSolid.transform.localScale);
             
-            var gs = globalSolid.GetSolid();
-            solids.Add(gs);
+          //  var gs = globalSolid.GetSolid();
+         //   solids.Add(gs);
             
-            var newHash = HashCode.Combine(HashCode.Combine(field.frequency,
+            var newHash = HashCode.Combine(HashCode.Combine(HashCode.Combine(field.frequency,
                 field.steps,
                 field.density,
                 field.soften,
@@ -76,13 +70,14 @@ namespace DefaultNamespace
                 field.scale), 
                 field.timeStep,
                 field.resolution,
+                field.surface,
                 config.budget,
                 field.offset,
                 field.photon.GetHashCode(),
-                gs.GetHashCode(),
-               
-              //  m.GetHashCode(),
-                solidHash);
+             //   gs.GetHashCode(),
+                solidHash),
+                m.GetHashCode()
+                );
             
             if (newHash == hash)
             {
@@ -106,6 +101,15 @@ namespace DefaultNamespace
             compute.SetVector("Offset",field.offset);
             marchingCubes.SetSculptSolids(solids);
             marchingCubes.Run(config, field.resolution);
+        }
+
+        private void Update()
+        {
+            if (!update)
+            {
+                return;
+            }
+            Construct();
         }
 
         private void OnDestroy()

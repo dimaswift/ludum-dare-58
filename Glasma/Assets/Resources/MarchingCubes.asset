@@ -12,6 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 18d6ec7f7d514701bd4274e77b1a0b37, type: 3}
   m_Name: MarchingCubes
   m_EditorClassIdentifier: Assembly-CSharp::Uriel.Behaviours.MarchingCubesConfig
-  budget: 200000
+  budget: 500000
   flipNormals: 0
   invertTriangles: 0

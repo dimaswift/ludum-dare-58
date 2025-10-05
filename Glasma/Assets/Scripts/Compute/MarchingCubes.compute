@@ -53,6 +53,10 @@ float expDecay(float a, float b, float decay, float t)
 
 float sampleMask(uint3 id)
 {
+    if (id.x == 0 || id.y == 0 || id.z == 0 || id.x == Dims.x || id.y == Dims.y || id.z == Dims.z)
+    {
+       return 0;
+    }
     float ux = float(id.x - float(Dims.x) * 0.5) / Dims.x;
     float uy = float(id.y - float(Dims.y) * 0.5) / Dims.x;
     float uz = float(id.z - float(Dims.z) * 0.5) / Dims.x;
@@ -66,38 +70,42 @@ float sampleMask(uint3 id)
     // cfg.colors = IcoVertices;
     cfg.dt = TimeStep;
     cfg.soften = Soften;
+    float msk = 1;
+ 
+
     float3 fieldPos = ((mul(Transform, p)) + float3(Transform[0][3],Transform[1][3],Transform[2][3]) + Offset) * exp(Scale);
 
-    Trajectory v = SampleField(Steps, fieldPos, float3(0,0,0), EscapeRadius, cfg, Photons[0], PhotonTransform, Solids[SolidCount - 1]);
-    float msk = 0;
-    for (int k = 0; k < SolidCount - 1; k++)
-    {
-        float f = evaluateSolidField(p, Solids[k]);
-        SculptSolid s = Solids[k];
-        switch (s.op)
-        {
-            case 0:
-                msk += f;
-                break;
-            case 1:
-                msk += v.energy * f;
-                break;
-            case 2:
-                msk += v.energy * f;
-                break;
-            case 3:
-                msk = min(v.energy, f * s.lerp) * s.exp;
-                break;
-            case 4:
-                msk = expDecay(msk, f, s.lerp, s.exp);
-                break;
-            default:
-                   
-                break;
-        }
-    }
+    Trajectory v = SampleField(Steps, fieldPos, float3(0,0,0), EscapeRadius, cfg, Photons[0], PhotonTransform);
+ 
+    // for (int k = 0; k < SolidCount ; k++)
+    // {
+    //     float f = evaluateSolidField(p, Solids[k]);
+    //     SculptSolid s = Solids[k];
+    //     switch (s.op)
+    //     {
+    //         case 0:
+    //             msk += f;
+    //             break;
+    //         case 1:
+    //             msk += v.energy * f;
+    //             break;
+    //         case 2:
+    //             msk += v.energy * f;
+    //             break;
+    //         case 3:
+    //             msk = min(v.energy, f * s.lerp) * s.exp;
+    //             break;
+    //         case 4:
+    //             msk = expDecay(msk, f, s.lerp, s.exp);
+    //             break;
+    //         default:
+    //                
+    //             break;
+    //     }
+    // }
 
-    return msk * v.energy;
+ 
+    return v.energy * msk;
 }
 
 float sampleFieldVoxel(uint x, uint y, uint z)
@@ -108,7 +116,7 @@ float sampleFieldVoxel(uint x, uint y, uint z)
 float4 VoxelValueWithGradient(uint3 i)
 {
     const uint3 i_n = max(i, 1) - 1;
-    const uint3 i_p = min(i + 1, Dims - 1);
+    const uint3 i_p = min(i + 1, Dims);
     
     // Sample the field values
     const float center = sampleFieldVoxel(i.x, i.y, i.z);
@@ -130,7 +138,7 @@ float4 VoxelValueWithGradient(uint3 i)
 void WriteVertex(uint offset, float3 p, float3 n)
 {
     uint addr_p = offset * SIZEOF_FLOAT3 * 2;
-    uint addr_n = addr_p + SIZEOF_FLOAT3;
+    uint addr_n = addr_p + SIZEOF_FLOAT3; 
     VertexBuffer.Store3(addr_p, asuint(p));
     VertexBuffer.Store3(addr_n, asuint(n));
 }
@@ -158,12 +166,10 @@ uint2 EdgeVertexPair(uint index)
 [numthreads(8, 8, 1)]
 void Construct(uint3 id : SV_DispatchThreadID)
 {
-    if (any(id + 1 >= Dims.xyz)) return;
-
     uint i;
     
     float totalAlpha = 0;
-    
+  //  [unroll]
     for (i = 0; i < 8; i++)
     {
         float a = sampleMask(id + CubeVertex(i));
@@ -173,11 +179,13 @@ void Construct(uint3 id : SV_DispatchThreadID)
     if (totalAlpha == 0) return;
 
     float4 samples[8];
-    
+
+   // [unroll]
     for (i = 0; i < 8; i++)
         samples[i] = VoxelValueWithGradient(id + CubeVertex(i));
 
     uint selector = 0;
+  //  [unroll]
     for (i = 0; i < 8; i++)
         selector |= (samples[i].w > 0) << i;
     
@@ -185,7 +193,7 @@ void Construct(uint3 id : SV_DispatchThreadID)
     
     float3 vertices[12];
     float3 normals[12];
-    [unroll]
+  //  [unroll]
     for (i = 0; i < 12; i++)
     {
         uint2 pair = EdgeVertexPair(i);
@@ -206,6 +214,7 @@ void Construct(uint3 id : SV_DispatchThreadID)
     }
     
     const uint2 tri_data = TriangleTable[selector];
+  //  [unroll]
     for (i = 0; i < 15; i += 3)
     {
         uint e3;
