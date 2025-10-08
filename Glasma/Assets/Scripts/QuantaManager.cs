@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -24,15 +25,40 @@ public class QuantaManager : MonoBehaviour
         for (int i = 0; i < volumes.Length; i++)
         {
             var cfg = volumes[i];
-            MaxTier = Mathf.Max(cfg.tier, MaxTier);
-            if(!pools.TryAdd(cfg.tier, new Pool<Quanta>(cfg.poolCapacity, cfg.prefab.gameObject)))
+            MaxTier = Mathf.Max(cfg.gen, MaxTier);
+            if(!pools.TryAdd(cfg.gen, new Pool<Quanta>(cfg.poolCapacity, cfg.prefab.gameObject)))
             {
-                Debug.LogError($"Volume tier {cfg.tier} already taken");
+                Debug.LogError($"Volume tier {cfg.gen} already taken");
             }
         }
     }
 
 
+    private async void SaveAllQuanta()
+    {
+        int progress = 0;
+        var targets = FindObjectsByType<Quanta>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        foreach (var q in targets)
+        {
+            try
+            {
+                await STLExporter.ExportMeshToSTLAsync(
+                    name: q.GetInstanceID().ToString(),
+                    mesh: q.Mesh,
+                    binary: true,
+                    optimizeVertices: true
+                );
+                Debug.Log($"Saved {++progress}/{targets.Length}");
+             
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Export failed: {ex.Message}");
+            }
+        }
+       
+    }
+    
     public Quanta Spawn(int tier)
     {
         if (pools.TryGetValue(tier, out var v))
@@ -45,6 +71,12 @@ public class QuantaManager : MonoBehaviour
     
     void Update()
     {
+
+        if (Input.GetKeyDown(KeyCode.S))
+        {
+            SaveAllQuanta();
+        }
+        
         if(!Input.GetKey(KeyCode.Space)) return;
         if (Input.GetMouseButtonDown(0))
         {

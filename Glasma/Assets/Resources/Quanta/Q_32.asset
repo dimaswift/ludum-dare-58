@@ -14,6 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::VolumeConfig
   prefab: {fileID: 9100227218959144261, guid: cbc8598c69bbf4a8c9bee57ea2a7f885, type: 3}
   poolCapacity: 16
-  tier: 3
+  gen: 3
   resolution: {x: 32, y: 32, z: 32}
+  holeResolution: {x: 16, y: 16, z: 16}
   maxTriangleBudget: 100000

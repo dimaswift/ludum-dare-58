@@ -13,20 +13,20 @@ MonoBehaviour:
   m_Name: Default
   m_EditorClassIdentifier: Assembly-CSharp::DefaultNamespace.FieldConfig
   photon:
-    frequency: 16
-    amplitude: -0.29
-    phase: -2.04
-    radius: 1.5
-    density: 6.87
-    scale: 1.55
-  offset: {x: 0, y: -35.44, z: 31.86}
-  steps: 1
-  radius: 278.5
-  escapeRadius: 94.1
-  soften: 12.1
-  timeStep: 31.3
-  density: 2.26
-  frequency: 149.7
-  size: -1.93
-  scale: -2.76
-  surface: 9.09
+    frequency: 510
+    amplitude: 0.89
+    phase: 20
+    radius: 8.34
+    density: -7.92
+    scale: 30.75
+  offset: {x: 0, y: 1.72, z: -1.15}
+  steps: 30
+  radius: -3.24
+  escapeRadius: 250.9
+  soften: 2.47
+  timeStep: 2.63
+  density: -1.73
+  frequency: 184.8
+  size: -6.93
+  scale: {x: -1.67, y: -1.67, z: -1.67}
+  surface: 148.5

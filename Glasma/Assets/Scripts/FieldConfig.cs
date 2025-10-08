@@ -16,7 +16,7 @@ public class FieldConfig : ScriptableObject
     public float density;
     public float frequency;
     public float size;
-    public float scale;
+    public Vector3 scale;
     public float surface;
   
 }

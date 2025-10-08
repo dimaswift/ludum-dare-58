@@ -1,12 +1,7 @@
-#define QUARK_COUNT 6
-#define PAIR_COUNT 15
-
 #define QUARK_COUNT 4
 #define PAIR_COUNT 6
 
 #define PI 3.14159265358979323846
-
-#include "Assets/Scripts/Compute/Masks.cginc"
 
 struct Particle
 {
@@ -41,43 +36,20 @@ struct FieldConfig
 const static float h = sqrt(3.0f) / 2.0f;
 
 const static  float3 VERTICES[QUARK_COUNT] = {
-    float3(0, 0, 0),
-    float3(-0.5f, -h/3.0f, 0.0f),  
-    float3( 0.5f, -h/3.0f, 0.0f),  
-    float3( 0.0f,  2.0f*h/3.0f, 0.0f) 
+    // float3(0, 0, 0),
+    // float3(-0.5f, -h/3.0f, 0.0f),  
+    // float3( 0.5f, -h/3.0f, 0.0f),  
+    // float3( 0.0f,  2.0f*h/3.0f, 0.0f)
+    float3(0.35355339, 0.35355339, 0.35355339),  
+float3(0.35355339, -0.35355339, -0.35355339), 
+float3(-0.35355339, 0.35355339, -0.35355339),
+float3(-0.35355339, -0.35355339, 0.35355339),
 };
 static const int2 PAIRS[PAIR_COUNT] = {
     int2(0,1), int2(0,2), int2(0,3),
     int2(1,2), int2(1,3), 
     int2(2,3), 
 };
-
-
-// const static  float3 VERTICES[QUARK_COUNT] = {
-//     float3(0.35355339, 0.35355339, 0.35355339),  // 0
-//     float3(0.35355339, -0.35355339, -0.35355339),  // 1
-//     float3(-0.35355339, 0.35355339, -0.35355339),  // 2
-//     float3(-0.35355339, -0.35355339, 0.35355339),  // 3
-// };
-
-
-// const static  float3 VERTICES[QUARK_COUNT] = {
-//     float3(1.0f, 0.0f, 0.0f),  // 4
-//     float3(-1.0f, 0.0f, 0.0f),  // 5
-//     float3(0.0f, 1.0f, 0.0f),  // 6
-//     float3(0.0f, -1.0f, 0.0f),  // 7
-//     float3(0.0f, 0.0f, 1.0f),  // 8
-//     float3(0.0f, 0.0f, -1.0f),  // 9
-// };
-//
-//
-// static const int2 PAIRS[PAIR_COUNT] = {
-//     int2(0,1), int2(0,2), int2(0,3), int2(0,4), 
-//      int2(0,5), int2(1,2), int2(1,3), int2(1,4), 
-//      int2(1,5), int2(2,3), int2(2,4), int2(2,5), 
-//      int2(3,4), int2(3,5), int2(4,5)
-// };
-
 
 inline void computeAccelerations(
     in Quark bodies[QUARK_COUNT], 
@@ -103,18 +75,20 @@ inline void computeAccelerations(
         float3 aji = -r * inv3;
 
        // aij = mul(bodies[j].color, aij);
-      //  aji = mul(bodies[i].color, aji);
+       // aji = mul(bodies[i].color, aji);
         
         acc[i] += aij;
         acc[j] += aji;
     }
 }
+
 const static float3 TETRAHEDRON[4] = {
-    float3(0.35355339, 0.35355339, 0.35355339),  // 0
-    float3(0.35355339, -0.35355339, -0.35355339),  // 1
-    float3(-0.35355339, 0.35355339, -0.35355339),  // 2
-    float3(-0.35355339, -0.35355339, 0.35355339),  // 3
+    float3(0.35355339, 0.35355339, 0.35355339),  
+    float3(0.35355339, -0.35355339, -0.35355339), 
+    float3(-0.35355339, 0.35355339, -0.35355339),
+    float3(-0.35355339, -0.35355339, 0.35355339),
 };
+
 inline void integrateLeapfrog(
     inout Quark bodies[QUARK_COUNT],
     float3 accel[QUARK_COUNT],
@@ -142,42 +116,35 @@ struct Photon
     float scale;
 };
 
-inline float sampleTetrahedral(const float3 pos, Photon photon, const float4x4 transform)
+inline float sampleTetrahedral(const float3 pos, Photon photon)
 {
     float d = 0.0;
     const float3 p0 = float3(0.35355339, 0.35355339, 0.35355339);
     const float3 p1 = float3(0.35355339, -0.35355339, -0.35355339);
     const float3 p2 = float3(-0.35355339, 0.35355339, -0.35355339);
     const float3 p3 = float3(-0.35355339, -0.35355339, 0.35355339);
-    
-    float3 offset = float3(transform[0][3], transform[1][3], transform[2][3]);
-    float3 transformed = p0;
+
     float rad = photon.radius;
     
-    float dist = saturate(distance(pos * photon.scale, transformed + offset * photon.scale) * rad);
+    float dist = saturate(distance(pos * photon.scale, p0 * photon.scale) * rad);
     d += sin(dist * photon.frequency + photon.phase) * photon.amplitude;
 
-    transformed = p1;
-    dist = saturate(distance(pos * photon.scale, transformed + offset * photon.scale) * rad);
+    dist = saturate(distance(pos * photon.scale, p1 * photon.scale) * rad);
+    d += sin(dist * photon.frequency + photon.phase) * photon.amplitude;
+
+    dist = saturate(distance(pos * photon.scale, p2 * photon.scale) * rad);
     d += sin(dist * photon.frequency + photon.phase) * photon.amplitude;
     
-    transformed = p2;
-    dist = saturate(distance(pos * photon.scale, transformed + offset * photon.scale) * rad);
-    d += sin(dist * photon.frequency + photon.phase) * photon.amplitude;
-
-    transformed = p3;
-    dist = saturate(distance(pos * photon.scale, transformed + offset * photon.scale) * rad);
+    dist = saturate(distance(pos * photon.scale, p3 * photon.scale) * rad);
     d += sin(dist * photon.frequency + photon.phase) * photon.amplitude;
     
     return d;
 }
 
 
-inline float sampleMatrix(const float3 pos, Photon photon, const float4x4 transform)
+inline float sampleMatrix(const float3 pos, Photon photon)
 {
     float d = 0.0;
-    float3 offset = float3(transform[0][3], transform[1][3], transform[2][3]);
-   
     float rad = photon.radius;
     [unroll]
     for (int x = -1; x <= 1; x++)
@@ -190,31 +157,37 @@ inline float sampleMatrix(const float3 pos, Photon photon, const float4x4 transf
             {
                 const float3 p = float3(x,y,z);
                 float3 transformed = p;
-                float dist = saturate(distance(pos * photon.scale, transformed + offset * photon.scale) * rad);
+                float dist = saturate(distance(pos * photon.scale, transformed * photon.scale) * rad);
                 d += sin(dist * photon.frequency + photon.phase) * photon.amplitude;
             }
         }
     }
     return d;
 }
-Trajectory SampleFieldN(
+
+Trajectory SampleField(
     int steps,
     float3 position, 
     float3 corePosition,
     float escapeR2,
-    FieldConfig cfg
+    FieldConfig cfg,
+    Photon photon
 ){
-    
     Quark quarks[QUARK_COUNT];
-    
 
+    float waveFunction = sampleTetrahedral(position, photon);
+    
     [unroll]
     for (int i=0; i<QUARK_COUNT; ++i)
     {
-        quarks[i].position = sin(length(position - (VERTICES[i]) * cfg.radius) * cfg.frequency + cfg.phase) * cfg.density;
+        quarks[i].position = sin(-length(position - (VERTICES[i]) * cfg.radius) * cfg.frequency + cfg.phase) * cfg.density;
         quarks[i].velocity = float3(0,0,0);
+        quarks[i].color = float3(1,1,1);
     }
 
+    //higgs?
+    quarks[0].position = corePosition;
+    
     float3 acc[QUARK_COUNT];
     
     int esc=steps;
@@ -243,72 +216,10 @@ Trajectory SampleFieldN(
               }
           }
         }
-      
-    }
-    
-    
-    Trajectory r;
-    r.step=esc;
-    r.energy=energy;
-    return r;
-}
-
-Trajectory SampleField(
-    int steps,
-    float3 position, 
-    float3 corePosition,
-    float escapeR2,
-    FieldConfig cfg,
-    Photon photon,
-    float4x4 photonTransform
-){
-    
-    Quark quarks[QUARK_COUNT];
-
-   // float f = sampleMatrix(position, photon, photonTransform);
-  
-  //  float f = evaluateSolidField(position, solid);
-    
-    [unroll]
-    for (int i=0; i<QUARK_COUNT; ++i)
-    {
-        quarks[i].position = sin(length(position - (VERTICES[i]) * cfg.radius) * cfg.frequency + cfg.phase) * cfg.density;
-        quarks[i].velocity = float3(0,0,0);
-    }
-
-    float3 acc[QUARK_COUNT];
-    
-    int esc=steps;
-    bool alive=true;
-    float energy=0.0;
-    
-    integrateLeapfrog(quarks, acc, cfg.dt, cfg.soften);
-        
-    float maxR2=0.0;
-        
-    for (int s = 0; s < steps; ++s)
-    {
-        if (alive)
-        {
-            [unroll]
-            for (int i=0;i<QUARK_COUNT;++i)
-            {
-                float v = dot(quarks[i].velocity, quarks[i].velocity);
-                energy += v;
-                maxR2 = max(maxR2, dot(quarks[i].velocity, quarks[i].velocity));
-
-                if(maxR2 > escapeR2)
-                {
-                    esc = s;
-                    alive = false;
-                }
-            }
-        }
-      
     }
     
     Trajectory r;
     r.step=esc;
-    r.energy=energy;
+    r.energy=energy  * waveFunction;
     return r;
 }

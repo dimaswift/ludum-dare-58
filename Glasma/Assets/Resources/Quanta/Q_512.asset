@@ -10,11 +10,11 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8a24f2327dbd46269dcd938f58835a36, type: 3}
-  m_Name: Q_16
+  m_Name: Q_512
   m_EditorClassIdentifier: Assembly-CSharp::VolumeConfig
-  prefab: {fileID: 9100227218959144261, guid: ced5ed54e149e4c5b9f42de85e912f9c, type: 3}
-  poolCapacity: 32
-  gen: 4
-  resolution: {x: 16, y: 16, z: 16}
+  prefab: {fileID: 9100227218959144261, guid: e347d92802aea44988e3063783f075bd, type: 3}
+  poolCapacity: 2
+  gen: 0
+  resolution: {x: 512, y: 512, z: 512}
   holeResolution: {x: 16, y: 16, z: 16}
-  maxTriangleBudget: 8000
+  maxTriangleBudget: 15000000

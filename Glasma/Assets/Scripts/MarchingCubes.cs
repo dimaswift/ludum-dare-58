@@ -179,7 +179,7 @@ public class MarchingCubes : System.IDisposable
     }
     
     public void SetSculptSolids(List<SculptSolid> solids)
-    {
+    { 
         if (solids.Count == 0)
         {
             solids.Add(SculptSolid.Default);

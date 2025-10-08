@@ -8,7 +8,8 @@ using Random = UnityEngine.Random;
 public class Quanta : MonoBehaviour, IPoolable
 {
     public bool InUse => gameObject.activeSelf;
-    
+    public Mesh Mesh => meshFilter.sharedMesh;
+
     [SerializeField] private bool update;
     [SerializeField] private FieldConfig field;
     [SerializeField] private Transform flesh;
@@ -30,27 +31,35 @@ public class Quanta : MonoBehaviour, IPoolable
     private BoxCollider box;
 
     private Rigidbody body;
-    
-    private Matrix4x4 gene;
 
-    [SerializeField] private List<Matrix4x4> dnaSequence = new(); 
+    private Matrix4x4 originalFractalPos;
+
+    private Vector3 birthPlace;
+    
+    [SerializeField]  private Vector3 zoom;
+    [SerializeField]  private Vector3 fractalRotation;
+    [SerializeField]  private Vector3 fractalPosition;
+    
+    
+    
+    private Vector3 fractalScale = Vector3.one;
+    
     
     private void Awake()
     {
+        fractalPosition = transform.position;
+        fractalRotation = transform.eulerAngles;
         Init();
         CollapseWave();
+        transform.position += new Vector3(0, 1, 0);
     }
     
-    public void CopyDNA(List<Matrix4x4> sequence)
-    {
-        dnaSequence.AddRange(sequence);
-    }
     
     public void Decay()
     {
         gameObject.SetActive(false);
 
-        if (config.tier >= QuantaManager.Instance.MaxTier)
+        if (config.gen >= QuantaManager.Instance.MaxTier)
         {
             return;
         }
@@ -58,21 +67,25 @@ public class Quanta : MonoBehaviour, IPoolable
         var pos = transform.position;
         var rot = transform.rotation;
 
-        var shrinkage = 2.0f / Mathf.Pow(2, config.tier + 1);
-        
+        var contaction = (1.0f / Mathf.Pow(2, config.gen + 1));
+       
         void Create(Vector3Int side)
         {
-            var part = QuantaManager.Instance.Spawn(config.tier + 1);
+            var part = QuantaManager.Instance.Spawn(config.gen + 1);
+           
             if (part == null) return;
-            Vector3 offset = new Vector3(side.x, side.y, side.z) * shrinkage * 0.5f;
+            
+            Vector3 offset = new Vector3(side.x, side.y, side.z) * contaction;
+    
             part.transform.rotation = rot;
             var dir = part.transform.TransformDirection(offset);
             part.transform.position = pos + dir;
-            Matrix4x4 dnaToKeep = new Matrix4x4();
-            dnaToKeep.SetTRS(flesh.position,flesh.rotation,Vector3.one);
-            dnaSequence.Add(dnaToKeep);
-            part.CopyDNA(dnaSequence);
-            
+            part.originalFractalPos = originalFractalPos;
+            part.fractalScale = fractalScale * 2;
+            part.fractalRotation = fractalRotation;
+            part.fractalPosition = (part.originalFractalPos * (part.transform.position)) * -part.fractalScale.x;
+            part.zoom = zoom;
+            part.birthPlace = part.transform.position;
             part.CollapseWave();
           //  part.Nudge(dir.normalized);
         }
@@ -96,12 +109,12 @@ public class Quanta : MonoBehaviour, IPoolable
 
     public void Resize()
     {
-        if (config.tier == 1)
+        if (config.gen == 1)
         {
             body.mass = density;
             return;
         }
-        var size = Vector3.one * (2.0f / Mathf.Pow(2, config.tier));
+        var size = Vector3.one * (2.0f / Mathf.Pow(2, config.gen));
         box.size = size;
         flesh.localScale = size;
         meshFilter.transform.localScale = size;
@@ -123,6 +136,9 @@ public class Quanta : MonoBehaviour, IPoolable
     
     public void Init()
     {
+        originalFractalPos = transform.worldToLocalMatrix.inverse;
+        fractalPosition = (originalFractalPos * transform.position) * -fractalScale.x;
+        birthPlace = transform.position;
         body = GetComponent<Rigidbody>();
         box = GetComponent<BoxCollider>();
         marchingCubes = new MarchingCubes(compute, config.maxTriangleBudget, config.holeResolution);
@@ -134,7 +150,7 @@ public class Quanta : MonoBehaviour, IPoolable
     
     public void OnPicked()
     {
-        dnaSequence.Clear();
+      //  dnaSequence.Clear();
         gameObject.SetActive(true);
     }
 
@@ -149,16 +165,15 @@ public class Quanta : MonoBehaviour, IPoolable
             solidHash += s.GetHashCode();
             solids.Add(s);
         }
-        
-        Matrix4x4 worldToFractal = gene.inverse;
-        //TODO: doesn't work right (yet)
-        foreach (var pair in dnaSequence)
-        {
-            worldToFractal *= pair;
-        }
-        gene = flesh.localToWorldMatrix;
+      
         var photonM = new Matrix4x4();
         
+        Matrix4x4 fractalMatrix = new Matrix4x4();
+
+        //fractalPosition = flesh.position;
+
+        fractalMatrix.SetTRS(fractalPosition, Quaternion.Euler(fractalRotation), new Vector3(fractalScale.x * zoom.x, fractalScale.y * zoom.y, fractalScale.z * zoom.z));
+
         var newHash = HashCode.Combine(HashCode.Combine(HashCode.Combine(field.frequency,
             field.steps,
             field.density,
@@ -171,25 +186,24 @@ public class Quanta : MonoBehaviour, IPoolable
             config.resolution,
             field.surface,
             field.offset,
-            field.photon.GetHashCode(),
+            field.photon,
             solidHash),
-            worldToFractal.GetHashCode(),
-            gene
+            fractalMatrix
             );
         
         if (newHash == hash)
         {
             return;
         }
-        
+
+        compute.SetBuffer(0, "Photons", photonBuffer);
         photonBuffer.SetData(new List<Photon>() {field.photon});
         hash = newHash;
         compute.SetMatrix("PhotonTranform", photonM);
-        compute.SetMatrix("WorldToFractalMatrix", worldToFractal);
+        compute.SetMatrix("ParentMatrix", fractalMatrix.inverse);
         
         // You also need to tell the shader where this cube currently IS in the world
-        compute.SetMatrix("LocalToWorldMatrix", gene);
-
+  
         compute.SetInt("Steps", field.steps);
         compute.SetFloat("Radius", field.radius);
         compute.SetFloat("EscapeRadius", field.escapeRadius);
@@ -197,11 +211,11 @@ public class Quanta : MonoBehaviour, IPoolable
         compute.SetFloat("Density", field.density);
         compute.SetFloat("Frequency", field.frequency);
         compute.SetFloat("Size", field.size);
-        compute.SetFloat("Scale", field.scale);
+        compute.SetVector("Scale", field.scale);
         compute.SetFloat("Surface", field.surface);
         compute.SetFloat("TimeStep", field.timeStep);
         compute.SetVector("Offset",field.offset);
-        marchingCubes.SetSculptSolids(solids);
+        marchingCubes.SetSculptSolids(solids); 
         marchingCubes.Run(config.resolution);
 
     }
