@@ -1,0 +1,334 @@
+
+#pragma kernel ComputeBitRevIndices
+#pragma kernel ComputeTwiddleFactors
+#pragma kernel ConvertTex3DToComplex
+#pragma kernel ConvertComplexMagToTex3D
+#pragma kernel ConvertComplexMagToTex3DScaled
+#pragma kernel ConvertComplexPhaseToTex3D
+#pragma kernel CenterComplex
+#pragma kernel ConjugateComplex
+#pragma kernel DivideComplexByDimensions
+#pragma kernel BitRevByRow
+#pragma kernel BitRevByCol
+#pragma kernel BitRevByDepth
+#pragma kernel ButterflyByRow
+#pragma kernel ButterflyByCol
+#pragma kernel ButterflyByDepth
+#pragma kernel ClearBuffer
+#define GROUP_SIZE_X 8
+#define GROUP_SIZE_Y 8
+#define GROUP_SIZE_Z 8
+#define PI 3.14159265359f
+#define PI_2 1.57079632679f
+
+struct Complex
+{
+    float real;
+    float imag;
+};
+
+int WIDTH;                              // power of 2
+int HEIGHT;                             // power of 2
+int DEPTH;                              // power of 2
+int N;                                  // either WIDTH, HEIGHT, or DEPTH
+
+RWStructuredBuffer<uint> BitRevIndices;     // size of WIDTH, HEIGHT, or DEPTH
+RWStructuredBuffer<Complex> TwiddleFactors; // size of half of WIDTH, HEIGHT, or DEPTH
+
+int BUTTERFLY_STRIDE;                   // 2, 4, 8, 16, ..., up to WIDTH (or HEIGHT or DEPTH)
+
+// dimensions are WIDTH x HEIGHT x DEPTH
+Texture3D<float> SrcTex3D;
+StructuredBuffer<Complex> Src;          // 1D buffer to represent 3D data
+RWTexture3D<float> DstTex3D;
+RWStructuredBuffer<Complex> Dst;        // 1D buffer to represent 3D data
+
+Complex ComplexAdd(Complex a, Complex b)
+{
+    Complex sum;
+    sum.real = a.real + b.real;
+    sum.imag = a.imag + b.imag;
+    return sum;
+}
+
+Complex ComplexSub(Complex a, Complex b)
+{
+    Complex sum;
+    sum.real = a.real - b.real;
+    sum.imag = a.imag - b.imag;
+    return sum;
+}
+
+Complex ComplexMult(Complex a, Complex b)
+{
+    Complex prod;
+    prod.real = (a.real * b.real) - (a.imag * b.imag);
+    prod.imag = (a.real * b.imag) + (a.imag * b.real);
+    return prod;
+}
+
+float ComplexMagnitude(Complex a)
+{
+    return sqrt(a.real * a.real + a.imag * a.imag);
+}
+
+float ComplexPhase(Complex a)
+{
+    return atan2(a.imag, a.real);
+}
+
+Complex ComplexConjugate(Complex a)
+{
+    Complex b;
+    b.real = a.real;
+    b.imag = -a.imag;
+    return b;
+}
+
+uint GetIndex3D(uint3 id)
+{
+    return id.z * (uint)WIDTH * (uint)HEIGHT + id.y * (uint)WIDTH + id.x;
+}
+
+[numthreads(GROUP_SIZE_X, 1, 1)]
+void ComputeBitRevIndices(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)N) return;
+    
+    int numBits = firstbithigh(N);
+    uint orig = id.x;
+    uint reversed = 0;
+    for (int j = 0; j < numBits; ++j)
+    {
+        reversed <<= 1;
+        if ((orig & 1) != 0)
+        {
+            reversed |= 1;
+        }
+        orig >>= 1;
+    }
+    BitRevIndices[id.x] = reversed;
+}
+
+[numthreads(GROUP_SIZE_X, 1, 1)]
+void ComputeTwiddleFactors(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)N/2) return;
+    
+    float phase = -(float)id.x * PI * 2 / N;
+    Complex factor;
+    factor.real = cos(phase);
+    factor.imag = sin(phase);
+    TwiddleFactors[id.x] = factor;
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ClearBuffer(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    uint pos = GetIndex3D(id);
+    Dst[pos].real = 0;
+    Dst[pos].imag = 0;
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ConvertTex3DToComplex(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    uint pos = GetIndex3D(id);
+    Complex c;
+    c.real = SrcTex3D[id.xyz];
+    c.imag = 0;
+    Dst[pos] = c;
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ConvertComplexMagToTex3D(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    float val = ComplexMagnitude(Src[GetIndex3D(id)]);
+    DstTex3D[id.xyz] = val;
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ConvertComplexMagToTex3DScaled(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    float val = ComplexMagnitude(Src[GetIndex3D(id)]);
+    val = log10(val * 10.0 + 1) / 4;
+    DstTex3D[id.xyz] = val;
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ConvertComplexPhaseToTex3D(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    float val = ComplexPhase(Src[GetIndex3D(id)]);
+    val = abs(val) / PI_2;
+    DstTex3D[id.xyz] = val;
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void CenterComplex(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    uint pos = GetIndex3D(id);
+    if (((id.x + id.y + id.z) % 2) == 1)
+    {
+        Dst[pos].real = -Src[pos].real;
+        Dst[pos].imag = -Src[pos].imag;
+    }
+    else
+    {
+        Dst[pos].real = Src[pos].real;
+        Dst[pos].imag = Src[pos].imag;
+    }
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ConjugateComplex(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    uint pos = GetIndex3D(id);
+    Dst[pos] = ComplexConjugate(Src[pos]);
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void DivideComplexByDimensions(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    uint pos = GetIndex3D(id);
+    float dimProd = (float)WIDTH * (float)HEIGHT * (float)DEPTH;
+    Dst[pos].real = Src[pos].real / dimProd;
+    Dst[pos].imag = Src[pos].imag / dimProd;
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void BitRevByRow(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    uint srcX = BitRevIndices[id.x];
+    uint srcPos = id.z * (uint)WIDTH * (uint)HEIGHT + id.y * (uint)WIDTH + srcX;
+    uint dstPos = GetIndex3D(id);
+    Dst[dstPos] = Src[srcPos];
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void BitRevByCol(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    uint srcY = BitRevIndices[id.y];
+    uint srcPos = id.z * (uint)WIDTH * (uint)HEIGHT + srcY * (uint)WIDTH + id.x;
+    uint dstPos = GetIndex3D(id);
+    Dst[dstPos] = Src[srcPos];
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void BitRevByDepth(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    uint srcZ = BitRevIndices[id.z];
+    uint srcPos = srcZ * (uint)WIDTH * (uint)HEIGHT + id.y * (uint)WIDTH + id.x;
+    uint dstPos = GetIndex3D(id);
+    Dst[dstPos] = Src[srcPos];
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ButterflyByRow(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    const uint stride           = (uint)BUTTERFLY_STRIDE;
+    const uint grp              = id.x / stride;
+    const uint grpIdx           = id.x % stride;
+    const uint offset           = grp * stride;
+    const uint halfStride       = stride / 2;
+    const uint halfStrideIdx    = grpIdx % halfStride;
+
+    uint sliceOffset = id.z * (uint)WIDTH * (uint)HEIGHT + id.y * (uint)WIDTH;
+    
+    Complex a = Src[sliceOffset + offset + halfStrideIdx];
+    Complex b = Src[sliceOffset + offset + halfStride + halfStrideIdx];
+    Complex w = TwiddleFactors[halfStrideIdx * (uint)WIDTH / stride];
+    Complex bw = ComplexMult(b, w);
+
+    uint dstPos = GetIndex3D(id);
+    if (grpIdx < halfStride)
+    {
+        Dst[dstPos] = ComplexAdd(a, bw);
+    }
+    else
+    {
+        Dst[dstPos] = ComplexSub(a, bw);
+    }
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ButterflyByCol(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    const uint stride           = (uint)BUTTERFLY_STRIDE;
+    const uint grp              = id.y / stride;
+    const uint grpIdx           = id.y % stride;
+    const uint offset           = grp * stride;
+    const uint halfStride       = stride / 2;
+    const uint halfStrideIdx    = grpIdx % halfStride;
+
+    uint sliceOffset = id.z * (uint)WIDTH * (uint)HEIGHT;
+    
+    Complex a = Src[sliceOffset + id.x + ((offset + halfStrideIdx) * (uint)WIDTH)];
+    Complex b = Src[sliceOffset + id.x + ((offset + halfStride + halfStrideIdx) * (uint)WIDTH)];
+    Complex w = TwiddleFactors[halfStrideIdx * (uint)HEIGHT / stride];
+    Complex bw = ComplexMult(b, w);
+
+    uint dstPos = GetIndex3D(id);
+    if (grpIdx < halfStride)
+    {
+        Dst[dstPos] = ComplexAdd(a, bw);
+    }
+    else
+    {
+        Dst[dstPos] = ComplexSub(a, bw);
+    }
+}
+
+[numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, GROUP_SIZE_Z)]
+void ButterflyByDepth(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)WIDTH || id.y >= (uint)HEIGHT || id.z >= (uint)DEPTH) return;
+    
+    const uint stride           = (uint)BUTTERFLY_STRIDE;
+    const uint grp              = id.z / stride;
+    const uint grpIdx           = id.z % stride;
+    const uint offset           = grp * stride;
+    const uint halfStride       = stride / 2;
+    const uint halfStrideIdx    = grpIdx % halfStride;
+
+    uint rowStride = (uint)WIDTH * (uint)HEIGHT;
+    
+    Complex a = Src[id.x + id.y * (uint)WIDTH + (offset + halfStrideIdx) * rowStride];
+    Complex b = Src[id.x + id.y * (uint)WIDTH + (offset + halfStride + halfStrideIdx) * rowStride];
+    Complex w = TwiddleFactors[halfStrideIdx * (uint)DEPTH / stride];
+    Complex bw = ComplexMult(b, w);
+
+    uint dstPos = GetIndex3D(id);
+    if (grpIdx < halfStride)
+    {
+        Dst[dstPos] = ComplexAdd(a, bw);
+    }
+    else
+    {
+        Dst[dstPos] = ComplexSub(a, bw);
+    }
+}

@@ -2,24 +2,27 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
 
 public class Quanta : MonoBehaviour, IPoolable
 {
     public bool InUse => gameObject.activeSelf;
-    public Mesh Mesh => meshFilter.sharedMesh;
+    public Mesh Mesh => meshFilter[0].sharedMesh;
 
     [SerializeField] private bool update;
     [SerializeField] private FieldConfig field;
     [SerializeField] private Transform flesh;
     [SerializeField] private QuantaConfig config;
-    [SerializeField] private MeshFilter meshFilter;
+    private MeshFilter[] meshFilter;
     [SerializeField] private float density = 1f;
-    [SerializeField] private ComputeShader compute;
-  
+    [SerializeField] private ComputeShader marchingCubesCompute;
+    [SerializeField] private List<Hole> holes;
     private MarchingCubes marchingCubes;
 
+    [SerializeField] private RenderTexture hole;
+    [SerializeField] private RenderTexture output;
     private readonly List<SolidContainer> solidContainers = new();
     
     private readonly List<SculptSolid> solids = new();
@@ -35,23 +38,43 @@ public class Quanta : MonoBehaviour, IPoolable
     private Matrix4x4 originalFractalPos;
 
     private Vector3 birthPlace;
+
+    [SerializeField] private Transform core;
     
     [SerializeField]  private Vector3 zoom;
     [SerializeField]  private Vector3 fractalRotation;
     [SerializeField]  private Vector3 fractalPosition;
     
-    
+    [System.Serializable]
+    public struct Hole
+    {
+        public Vector3Int position;
+        public int size;
+    }
     
     private Vector3 fractalScale = Vector3.one;
-    
-    
+
+
     private void Awake()
     {
+        meshFilter = GetComponentsInChildren<MeshFilter>();
+        output = new RenderTexture(config.resolution.x, config.resolution.y, 0);
+        output.useMipMap = false;
+        output.wrapMode = TextureWrapMode.Repeat;
+        output.filterMode = FilterMode.Point;
+        output.dimension = TextureDimension.Tex3D;
+        output.volumeDepth = config.resolution.z;
+        output.enableRandomWrite = true;
+        output.Create();
+        
         fractalPosition = transform.position;
         fractalRotation = transform.eulerAngles;
         Init();
         CollapseWave();
         transform.position += new Vector3(0, 1, 0);
+        
+
+    
     }
     
     
@@ -59,7 +82,7 @@ public class Quanta : MonoBehaviour, IPoolable
     {
         gameObject.SetActive(false);
 
-        if (config.gen >= QuantaManager.Instance.MaxTier)
+        if (config.gen >= QuantaManager.Instance.MaxGen)
         {
             return;
         }
@@ -117,7 +140,10 @@ public class Quanta : MonoBehaviour, IPoolable
         var size = Vector3.one * (2.0f / Mathf.Pow(2, config.gen));
         box.size = size;
         flesh.localScale = size;
-        meshFilter.transform.localScale = size;
+        foreach (var filter in meshFilter)
+        {
+            filter.transform.localScale = size;
+        }
         body.mass = (size.x * size.y * size.z) * density;
     }
 
@@ -141,11 +167,16 @@ public class Quanta : MonoBehaviour, IPoolable
         birthPlace = transform.position;
         body = GetComponent<Rigidbody>();
         box = GetComponent<BoxCollider>();
-        marchingCubes = new MarchingCubes(compute, config.maxTriangleBudget, config.holeResolution);
+        marchingCubes = new MarchingCubes(marchingCubesCompute, config.maxTriangleBudget, config.holeResolution);
+     
         photonBuffer = new ComputeBuffer(1, Marshal.SizeOf<Photon>());
-        compute.SetBuffer(0, "Photons", photonBuffer);
-        meshFilter.mesh = marchingCubes.Mesh;
+        marchingCubesCompute.SetBuffer(0, "Photons", photonBuffer);
+        foreach (var filter in meshFilter)
+        {
+            filter.sharedMesh = marchingCubes.Mesh;
+        }
         Resize();
+        
     }
     
     public void OnPicked()
@@ -157,8 +188,13 @@ public class Quanta : MonoBehaviour, IPoolable
     public void CollapseWave()
     {
         solids.Clear();
-        GetComponentsInChildren(solidContainers);
+        core.GetComponentsInChildren(false, solidContainers);
         int solidHash = 0;
+        int holeHash = 0;
+        foreach (var h in solidContainers)
+        {
+            holeHash+=h.transform.position.GetHashCode();
+        }
         foreach (var container in solidContainers)
         {
             var s = container.GetSolid();
@@ -188,7 +224,8 @@ public class Quanta : MonoBehaviour, IPoolable
             field.offset,
             field.photon,
             solidHash),
-            fractalMatrix
+            fractalMatrix,
+            holeHash
             );
         
         if (newHash == hash)
@@ -196,27 +233,41 @@ public class Quanta : MonoBehaviour, IPoolable
             return;
         }
 
-        compute.SetBuffer(0, "Photons", photonBuffer);
+       // marchingCubes.AddSphere();
+        marchingCubes.ClearAllHoles();
+        foreach (var s in solidContainers)
+        {
+            var pos = s.transform.localPosition;
+            marchingCubes.AddHole(new Vector3Int(
+                Mathf.RoundToInt((pos.x) + config.resolution.x / 2),
+                Mathf.RoundToInt((pos.y) + config.resolution.y / 2), 
+                Mathf.RoundToInt((pos.z) + config.resolution.z / 2)), (int) s.GetSolid().scale);
+        }
+        hole = marchingCubes.holeMaskTexture;
+      
+        QuantaManager.Instance.DoFFT(config.gen, marchingCubes.holeMaskTexture, output);
+        
+        marchingCubesCompute.SetBuffer(0, "Photons", photonBuffer);
         photonBuffer.SetData(new List<Photon>() {field.photon});
         hash = newHash;
-        compute.SetMatrix("PhotonTranform", photonM);
-        compute.SetMatrix("ParentMatrix", fractalMatrix.inverse);
+        marchingCubesCompute.SetMatrix("PhotonTranform", photonM);
+        marchingCubesCompute.SetMatrix("ParentMatrix", fractalMatrix.inverse);
         
         // You also need to tell the shader where this cube currently IS in the world
   
-        compute.SetInt("Steps", field.steps);
-        compute.SetFloat("Radius", field.radius);
-        compute.SetFloat("EscapeRadius", field.escapeRadius);
-        compute.SetFloat("Soften", field.soften);
-        compute.SetFloat("Density", field.density);
-        compute.SetFloat("Frequency", field.frequency);
-        compute.SetFloat("Size", field.size);
-        compute.SetVector("Scale", field.scale);
-        compute.SetFloat("Surface", field.surface);
-        compute.SetFloat("TimeStep", field.timeStep);
-        compute.SetVector("Offset",field.offset);
+        marchingCubesCompute.SetInt("Steps", field.steps);
+        marchingCubesCompute.SetFloat("Radius", field.radius);
+        marchingCubesCompute.SetFloat("EscapeRadius", field.escapeRadius);
+        marchingCubesCompute.SetFloat("Soften", field.soften);
+        marchingCubesCompute.SetFloat("Density", field.density);
+        marchingCubesCompute.SetFloat("Frequency", field.frequency);
+        marchingCubesCompute.SetFloat("Size", field.size);
+        marchingCubesCompute.SetVector("Scale", field.scale);
+        marchingCubesCompute.SetFloat("Surface", field.surface);
+        marchingCubesCompute.SetFloat("TimeStep", field.timeStep);
+        marchingCubesCompute.SetVector("Offset",field.offset);
         marchingCubes.SetSculptSolids(solids); 
-        marchingCubes.Run(config.resolution);
+        marchingCubes.Run(config.resolution, output);
 
     }
 
@@ -233,5 +284,7 @@ public class Quanta : MonoBehaviour, IPoolable
     {
         marchingCubes?.Dispose();
         photonBuffer?.Release();
+     
+        output?.Release();
     }
 }

@@ -4,7 +4,8 @@ using UnityEngine;
 
 public class QuantaManager : MonoBehaviour
 {
-    public int MaxTier { get; private set; }
+    [SerializeField] private ComputeShader fftShader;
+    public int MaxGen { get; private set; }
     private static QuantaManager instance;
     
     public static QuantaManager Instance
@@ -17,22 +18,44 @@ public class QuantaManager : MonoBehaviour
     }
     
     private readonly Dictionary<int,Pool<Quanta>> pools = new();
+    private readonly Dictionary<int,FFT> ffts = new();
     
-    void Start()
+    void Awake()
     {
         var volumes = Resources.LoadAll<QuantaConfig>("Quanta");
     
         for (int i = 0; i < volumes.Length; i++)
         {
             var cfg = volumes[i];
-            MaxTier = Mathf.Max(cfg.gen, MaxTier);
+            var fft = new FFT(fftShader);
+            fft.Init(cfg.resolution.x, cfg.resolution.y, cfg.resolution.z);
+            if(!ffts.TryAdd(cfg.gen, fft))
+            {
+                Debug.LogError($"Quanta gen {cfg.gen} already taken");
+            }
+            
+            MaxGen = Mathf.Max(cfg.gen, MaxGen);
             if(!pools.TryAdd(cfg.gen, new Pool<Quanta>(cfg.poolCapacity, cfg.prefab.gameObject)))
             {
-                Debug.LogError($"Volume tier {cfg.gen} already taken");
+                Debug.LogError($"Quanta gen {cfg.gen} already taken");
             }
+
+         
         }
     }
 
+    public void DoFFT(int gen, RenderTexture input, RenderTexture output)
+    {
+        if (!ffts.TryGetValue(gen, out var fft))
+        {
+            Debug.LogError($"Invalid gen {gen}");
+            return;
+        }
+        fft.Load(input);
+        fft.RecenterData();
+        fft.Forward();
+        fft.GetMagnitudeSpectrumScaled(output);
+    }
 
     private async void SaveAllQuanta()
     {
@@ -43,7 +66,7 @@ public class QuantaManager : MonoBehaviour
             try
             {
                 await STLExporter.ExportMeshToSTLAsync(
-                    name: q.GetInstanceID().ToString(),
+                    name: Guid.NewGuid().ToString().Substring(0,5).ToUpper(),
                     mesh: q.Mesh,
                     binary: true,
                     optimizeVertices: true
@@ -68,7 +91,15 @@ public class QuantaManager : MonoBehaviour
         Debug.LogWarning($"Volume tier {tier} doesn't exist");
         return null;
     }
-    
+
+    private void OnDestroy()
+    {
+        foreach (var fft in ffts)
+        {
+            fft.Value.Dispose();
+        }
+    }
+
     void Update()
     {
 

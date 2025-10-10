@@ -55,7 +55,9 @@ MonoBehaviour:
   config: {fileID: 11400000, guid: c904b9872030e4d4bb59d7679f297216, type: 2}
   meshFilter: {fileID: 6689361229437962783}
   density: 1
-  compute: {fileID: 7200000, guid: b66db7774f2542f9887bc513683eb5ed, type: 3}
+  marchingCubesCompute: {fileID: 7200000, guid: b66db7774f2542f9887bc513683eb5ed, type: 3}
+  fftCompute: {fileID: 7200000, guid: 8915d5616c3f4a22b301dc14ee2afc88, type: 3}
+  holes: []
   zoom: {x: 0, y: 0, z: 0}
   fractalRotation: {x: 0, y: 0, z: 0}
   fractalPosition: {x: 0, y: 0, z: 0}

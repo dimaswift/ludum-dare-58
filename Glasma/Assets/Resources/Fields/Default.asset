@@ -19,14 +19,14 @@ MonoBehaviour:
     radius: 8.34
     density: -7.92
     scale: 30.75
-  offset: {x: 0, y: 1.72, z: -1.15}
+  offset: {x: 10.66, y: 1.72, z: -1.15}
   steps: 30
-  radius: -3.24
-  escapeRadius: 250.9
+  radius: 3.04
+  escapeRadius: 251.4
   soften: 2.47
-  timeStep: 2.63
-  density: -1.73
-  frequency: 184.8
-  size: -6.93
-  scale: {x: -1.67, y: -1.67, z: -1.67}
-  surface: 148.5
+  timeStep: 2.23
+  density: 2.49
+  frequency: 3.18
+  size: -8.89
+  scale: {x: 6.34, y: -1.67, z: -1.67}
+  surface: 3.32

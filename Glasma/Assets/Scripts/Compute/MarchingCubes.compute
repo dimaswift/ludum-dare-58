@@ -3,6 +3,7 @@
 #pragma kernel InitHoleMask
 #pragma kernel AddHole
 #pragma kernel AddHoleSoft
+#pragma kernel AddSphere 
 
 #define SIZEOF_UINT 4
 #define SIZEOF_FLOAT3 12
@@ -18,10 +19,9 @@ StructuredBuffer<uint2> TriangleTable;
 StructuredBuffer<Photon> Photons;
 StructuredBuffer<SculptSolid> Solids;
 RWTexture3D<float> HoleMask;
+Texture3D<float> Field;
 uint3 HoleMaskDims; 
-SamplerState samplerHoleMask; // Define this
-
-
+ 
 uint3 Dims;
 uint MaxTriangle;
 uint FlipNormals;
@@ -45,6 +45,7 @@ float Surface;
 int Steps;
 float3 Offset;
 float4x4 PhotonTransform;
+
 
 float3 TransformPoint(float3 p)
 {
@@ -70,52 +71,123 @@ float sampleMask(uint3 id)
     {
        return 0;
     }
+    //
+
+    // float3 uvw = (float3)id / (float3)Dims;
+    // uint3 holeMaskCoord = (uint3)(uvw * (float3)HoleMaskDims);
+    // holeMaskCoord = min(holeMaskCoord, HoleMaskDims - 1);
+    //
+    // float holeMask = HoleMask[holeMaskCoord];
+    //
+    // if (holeMask < 1)
+    // {
+    //     return 0; // Inside hole
+    // }
+    //
     
-    // Nearest neighbor sampling
-    float3 uvw = (float3)id / (float3)Dims;
-    uint3 holeMaskCoord = (uint3)(uvw * (float3)HoleMaskDims);
-    holeMaskCoord = min(holeMaskCoord, HoleMaskDims - 1);
+   float ux = float(id.x - float(Dims.x) * 0.5) / Dims.x;
+   float uy = float(id.y - float(Dims.y) * 0.5) / Dims.x;
+   float uz = float(id.z - float(Dims.z) * 0.5) / Dims.x;
     
-    float holeMask = HoleMask[holeMaskCoord];
-    
-    if (holeMask < 1)
-    {
-        return 0; // Inside hole
-    }
-    
-    
-    float ux = float(id.x - float(Dims.x) * 0.5) / Dims.x;
-    float uy = float(id.y - float(Dims.y) * 0.5) / Dims.x;
-    float uz = float(id.z - float(Dims.z) * 0.5) / Dims.x;
-    
-    float3 p = float3(ux, uy, uz);
-    FieldConfig cfg;
-    cfg.radius = Radius;
-    cfg.phase = 0;
-    cfg.frequency = Frequency;
-    cfg.density = Density;
+ //   float3 p = float3(ux, uy, uz);
+  //  FieldConfig cfg;
+ //   cfg.radius = Radius;
+  //  cfg.phase = 0;
+  //  cfg.frequency = Frequency;
+   // cfg.density = Density;
     // cfg.colors = IcoVertices;
-    cfg.dt = TimeStep;
-    cfg.soften = Soften;
+ //   cfg.dt = TimeStep;
+  //  cfg.soften = Soften;
     float msk = 1;
     
  
     // 3. Transform the world position back into the parent's "fractal space"
     //    This is the key step that makes the fractal "stick" to the cube.
-    float3 fractalPos = mul(ParentMatrix, float4(p, 1.0)).xyz;
+  //  float3 fractalPos = mul(ParentMatrix, float4(p, 1.0)).xyz;
 
     // 4. Apply the final global fractal scaling
-    float3 finalSamplePos = (fractalPos + Offset) * exp(Scale);
+  //  float3 finalSamplePos = (fractalPos + Offset) * exp(Scale);
 
-    Trajectory v = SampleField(Steps, finalSamplePos, float3(0,0,0), EscapeRadius, cfg, Photons[0]); 
+    //Trajectory v = SampleField(Steps, finalSamplePos, float3(0,0,0), EscapeRadius, cfg, Photons[0]);
+    float e = Field[id];
+  //  e+=Field[uint3(id.x + 1, ind.y, ind.z)];
+    // int c = 0;
+    // for (int x = -1; x <= 1; ++x)
+    // {
+    //     for (int y = -1; y <= 1; ++y)
+    //     {
+    //         for (int z = -1; z <= 1; ++z)
+    //         {
+    //             int3 ind = id + int3(x,y,z);
+    //             if(ind.x < 0 || id.x >= Dims.x || ind.y < 0 || id.y >= Dims.y || ind.z < 0 || id.z >= Dims.z)
+    //             {
+    //                 continue;
+    //             }
+    //             e+=Field[uint3(ind.x, ind.y, ind.z)];
+    //             c++;
+    //         }
+    //     }
+    // }
+
+    //e/=c;
+    
   //  float m = evaluateSolidField(p, Solids[0]);
-    return v.energy * msk;
+
+
+    return exp(-e) + Density;
+}
+
+float random (float3 uv)
+{
+    return frac(sin(dot(uv,float3(12.9898,78.233,5617.233)))*43758.5453123);
+}
+
+// Dispatch with [numthreads(8,8,8)]
+[numthreads(8,8,8)]
+void AddSphere (uint3 id : SV_DispatchThreadID)
+{
+    // Get texture dimensions
+    uint width, height, depth;
+    HoleMask.GetDimensions(width, height, depth);
+    
+    // Check bounds
+    if (id.x >= width || id.y >= height || id.z >= depth)
+        return;
+    
+    // Calculate center of the volume
+    float3 center = float3(width, height, depth) * 0.5;
+    
+    // Calculate distance from current voxel to center
+    float3 pos = float3(id.x, id.y, id.z);
+
+    float v = 0;
+
+    // if(pos.x >= center.x - Radius && pos.x <= center.x + Radius && pos.y >= center.y - Radius && pos.y <= center.y + Radius && pos.z >= center.z - Radius && pos.z <= center.z + Radius)
+    // {
+    //     v = 1.0;
+    // }
+    //
+    float distance = length(pos - center);
+    
+    // Define your sphere radius
+    float radius = Radius; // Adjust this value
+    
+    // Set voxel value: 1.0 if inside sphere, 0.0 if outside
+    v = distance <= radius ? 1.0 : 0.0;
+
+    if(id.x == (int)Frequency)
+    {
+        v = 1;
+    }
+    
+    HoleMask[id] = v;
+    
 }
 
 [numthreads(1, 1, 1)]
 void InitHoleMask(uint3 id : SV_DispatchThreadID)
 {
-    HoleMask[id] = 1.0;
+    HoleMask[id] = 0.0; 
 }
 
 [numthreads(1, 1, 1)]
@@ -127,7 +199,7 @@ void AddHole(uint3 id : SV_DispatchThreadID)
     if (any(writePos >= HoleMaskDims)) return;
     
     // Write hole value
-    HoleMask[writePos] = HoleValue;
+    HoleMask[writePos] = 1.0;
 }
 
 [numthreads(1, 1, 1)]
@@ -260,9 +332,12 @@ void Construct(uint3 id : SV_DispatchThreadID)
         uint e3;
         uint e2;
         uint e1;
-        e1 = EdgeIndexFromTriangleTable(tri_data, i);
+        e3 = EdgeIndexFromTriangleTable(tri_data, i);
         e2 = EdgeIndexFromTriangleTable(tri_data, i + 1);
-        e3 = EdgeIndexFromTriangleTable(tri_data, i + 2);
+        e1 = EdgeIndexFromTriangleTable(tri_data, i + 2);
+        // e1 = EdgeIndexFromTriangleTable(tri_data, i);
+        // e2 = EdgeIndexFromTriangleTable(tri_data, i + 1);
+        // e3 = EdgeIndexFromTriangleTable(tri_data, i + 2);
         if (e1 != 15)
         {
             const uint count = Counter.IncrementCounter();
